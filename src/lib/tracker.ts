@@ -19,6 +19,8 @@ export type TrackedItem = {
   category?: string;
   note?: string;
   productUrl?: string;
+  productPhoto?: string;
+  listedPriceOverride?: { amount: number; currency: string };
   currentProduct?: {
     title?: string;
     imageUrl?: string;
@@ -62,6 +64,12 @@ export function validItems(value: unknown): value is TrackedItem[] {
     typeof item.id === "string" && typeof item.name === "string" &&
     typeof item.createdAt === "string" && Array.isArray(item.events) &&
     (item.productUrl === undefined || (typeof item.productUrl === "string" && item.productUrl.length <= 2048 && isSafeHttpsUrl(item.productUrl))) &&
+    (item.productPhoto === undefined || (typeof item.productPhoto === "string" && item.productPhoto.length <= 1_500_000 && /^data:image\/(?:jpeg|webp|png);base64,/i.test(item.productPhoto))) &&
+    (item.listedPriceOverride === undefined || (
+      item.listedPriceOverride && typeof item.listedPriceOverride === "object" &&
+      typeof item.listedPriceOverride.amount === "number" && Number.isFinite(item.listedPriceOverride.amount) && item.listedPriceOverride.amount >= 0 &&
+      typeof item.listedPriceOverride.currency === "string" && /^[A-Z]{3}$/.test(item.listedPriceOverride.currency)
+    )) &&
     (item.currentProduct === undefined || (
       item.currentProduct && typeof item.currentProduct === "object" &&
       (item.currentProduct.title === undefined || (typeof item.currentProduct.title === "string" && item.currentProduct.title.length <= 240)) &&

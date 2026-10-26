@@ -90,6 +90,14 @@ function productNodes(value: unknown): Record<string, unknown>[] {
   return [...(isProduct ? [object] : []), ...Object.values(object).flatMap(productNodes)];
 }
 
+function offerNodes(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(offerNodes);
+  if (!value || typeof value !== "object") return [];
+  const object = value as Record<string, unknown>;
+  const found = object.price !== undefined || object.lowPrice !== undefined;
+  return [...(found ? [object] : []), ...Object.values(object).flatMap(offerNodes)];
+}
+
 function firstText(value: unknown): string | undefined {
   if (typeof value === "string" && value.trim()) return decodeEntities(value.trim());
   if (value && typeof value === "object" && "name" in value) return firstText((value as { name?: unknown }).name);
@@ -128,19 +136,23 @@ function positivePrice(value: unknown) {
 
 function productData(html: string, sourceUrl: URL) {
   const meta = metaValues(html);
-  const scripts = [...html.matchAll(/<script\b[^>]*type\s*=\s*(["'])application\/ld\+json\1[^>]*>([\s\S]*?)<\/script\s*>/gi)];
-  const products = scripts.flatMap((script) => {
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
+  const structured = scripts.flatMap((script) => {
+    const attributes = script[1];
+    const type = attributes.match(/\btype\s*=\s*(["'])(.*?)\1/i)?.[2]?.toLowerCase();
+    const isStructured = type === "application/ld+json" || type === "application/json";
+    if (!isStructured || script[2].length > MAX_HTML_BYTES) return [];
     try { return productNodes(JSON.parse(decodeEntities(script[2].trim()))); } catch { return []; }
   });
-  const product = products[0];
+  const product = structured[0];
   const offersValue = product?.offers;
-  const offers = Array.isArray(offersValue) ? offersValue[0] : offersValue;
-  const offer = offers && typeof offers === "object" ? offers as Record<string, unknown> : undefined;
+  const offer = offerNodes(offersValue).sort((left, right) => (positivePrice(left.price ?? left.lowPrice) ?? Infinity) - (positivePrice(right.price ?? right.lowPrice) ?? Infinity))[0];
   const specificationValue = offer?.priceSpecification;
-  const specification = specificationValue && typeof specificationValue === "object" ? specificationValue as Record<string, unknown> : undefined;
+  const specification = Array.isArray(specificationValue) ? specificationValue.find((entry) => entry && typeof entry === "object") as Record<string, unknown> | undefined : specificationValue && typeof specificationValue === "object" ? specificationValue as Record<string, unknown> : undefined;
   const image = firstImageURL(product?.image);
-  const title = firstText(product?.name) ?? meta.get("og:title") ?? meta.get("twitter:title");
-  const amount = positivePrice(offer?.price ?? offer?.lowPrice ?? specification?.price ?? meta.get("product:price:amount") ?? meta.get("og:price:amount"));
+  const htmlTitle = html.match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i)?.[1].replace(/<[^>]+>/g, "").trim();
+  const title = firstText(product?.name) ?? meta.get("og:title") ?? meta.get("twitter:title") ?? (htmlTitle ? decodeEntities(htmlTitle) : undefined);
+  const amount = positivePrice(offer?.price ?? offer?.lowPrice ?? specification?.price ?? meta.get("product:price:amount") ?? meta.get("og:price:amount") ?? meta.get("price"));
   const currencyValue = offer?.priceCurrency ?? specification?.priceCurrency ?? meta.get("product:price:currency") ?? meta.get("og:price:currency");
   const currency = typeof currencyValue === "string" && /^[A-Z]{3}$/i.test(currencyValue) ? currencyValue.toUpperCase() : undefined;
   const rawImage = meta.get("og:image:secure_url") ?? image ?? meta.get("og:image") ?? meta.get("twitter:image");

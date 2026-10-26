@@ -54,8 +54,19 @@ export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [productFetch, setProductFetch] = useState<{ itemId: string; status: "loading" | "error"; message?: string } | null>(null);
   const [productRefreshToken, setProductRefreshToken] = useState(0);
+  const [editingProductLinkId, setEditingProductLinkId] = useState<string | null>(null);
+  const [editingListedPriceId, setEditingListedPriceId] = useState<string | null>(null);
+  const [listedPriceError, setListedPriceError] = useState("");
+  const [productLinkError, setProductLinkError] = useState("");
+  const [photoDraftFile, setPhotoDraftFile] = useState<File | null>(null);
+  const [photoDraftUrl, setPhotoDraftUrl] = useState("");
+  const [photoDraftItemId, setPhotoDraftItemId] = useState<string | null>(null);
+  const [photoZoom, setPhotoZoom] = useState(1);
+  const [photoOffsetX, setPhotoOffsetX] = useState(0);
+  const [photoOffsetY, setPhotoOffsetY] = useState(0);
   const nameInput = useRef<HTMLInputElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
+  const productPhotoInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -133,6 +144,11 @@ export default function Home() {
     });
     return () => controller.abort();
   }, [ready, selectedItem?.id, selectedItem?.productUrl, productRefreshToken]);
+
+  useEffect(() => {
+    if (!photoDraftUrl) return;
+    return () => URL.revokeObjectURL(photoDraftUrl);
+  }, [photoDraftUrl]);
 
   const stats = useMemo(() => {
     const buyEvents = items.flatMap((item) => purchases(item));
@@ -274,6 +290,105 @@ export default function Home() {
     setModal("event");
   }
 
+  function saveProductLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedItem) return;
+    const form = new FormData(event.currentTarget);
+    const value = String(form.get("productUrl") ?? "").trim();
+    if (value) {
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "https:" || url.username || url.password || !url.hostname.includes(".")) throw new Error("invalid URL");
+      } catch {
+        setProductLinkError("Use a full product link starting with https://.");
+        return;
+      }
+    }
+    setItems((current) => current.map((item) => item.id === selectedItem.id
+      ? { ...item, productUrl: value || undefined, currentProduct: value === item.productUrl ? item.currentProduct : undefined }
+      : item));
+    setProductLinkError("");
+    setEditingProductLinkId(null);
+    announce(value ? "Product link updated." : "Product link removed.");
+  }
+
+  function saveListedPrice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedItem) return;
+    const form = new FormData(event.currentTarget);
+    const value = String(form.get("listedAmount") ?? "").trim();
+    const amount = value ? Number(value) : undefined;
+    if (value && (!Number.isFinite(amount) || (amount ?? -1) < 0)) {
+      setListedPriceError("Enter a valid price, or leave it blank to use the shop price.");
+      return;
+    }
+    const currency = String(form.get("listedCurrency") || "INR");
+    setItems((current) => current.map((item) => item.id === selectedItem.id
+      ? { ...item, listedPriceOverride: amount === undefined ? undefined : { amount, currency } }
+      : item));
+    setListedPriceError("");
+    setEditingListedPriceId(null);
+    announce(amount === undefined ? "Using the shop price again." : "Listed price saved.");
+  }
+
+  function chooseProductPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedItem) return;
+    if (!file.type.startsWith("image/")) { announce("Choose an image file."); return; }
+    if (file.size > 15 * 1024 * 1024) { announce("Choose an image under 15 MB."); return; }
+    setPhotoDraftUrl(URL.createObjectURL(file));
+    setPhotoDraftFile(file);
+    setPhotoDraftItemId(selectedItem.id);
+    setPhotoZoom(1);
+    setPhotoOffsetX(0);
+    setPhotoOffsetY(0);
+  }
+
+  async function saveProductPhoto() {
+    if (!selectedItem || !photoDraftFile || photoDraftItemId !== selectedItem.id) return;
+    try {
+      const image = await createImageBitmap(photoDraftFile);
+      const targetWidth = 640;
+      const targetHeight = 800;
+      const targetRatio = targetWidth / targetHeight;
+      let cropWidth = image.width;
+      let cropHeight = image.height;
+      if (cropWidth / cropHeight > targetRatio) cropWidth = cropHeight * targetRatio;
+      else cropHeight = cropWidth / targetRatio;
+      cropWidth /= photoZoom;
+      cropHeight /= photoZoom;
+      const availableX = image.width - cropWidth;
+      const availableY = image.height - cropHeight;
+      const sourceX = Math.min(availableX, Math.max(0, availableX / 2 + (photoOffsetX / 100) * availableX / 2));
+      const sourceY = Math.min(availableY, Math.max(0, availableY / 2 + (photoOffsetY / 100) * availableY / 2));
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Image editor unavailable");
+      context.drawImage(image, sourceX, sourceY, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
+      image.close();
+      const productPhoto = canvas.toDataURL("image/jpeg", 0.78);
+      setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, productPhoto } : item));
+      setPhotoDraftFile(null);
+      setPhotoDraftUrl("");
+      setPhotoDraftItemId(null);
+      announce("Product photo saved.");
+    } catch {
+      announce("That photo could not be prepared. Try another image.");
+    }
+  }
+
+  function removeProductPhoto() {
+    if (!selectedItem) return;
+    setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, productPhoto: undefined } : item));
+    setPhotoDraftFile(null);
+    setPhotoDraftUrl("");
+    setPhotoDraftItemId(null);
+    announce("Custom photo removed.");
+  }
+
   function removeItem(item: TrackedItem) {
     if (!window.confirm(`Remove “${item.name}” and its history? This cannot be undone.`)) return;
     setItems((current) => current.filter((entry) => entry.id !== item.id));
@@ -413,7 +528,7 @@ export default function Home() {
               const isActive = item.id === (selectedItem?.id ?? visibleItems[0]?.id);
               return <button className={`item-row ${isActive ? "selected" : ""}`} key={item.id} onClick={() => setSelectedId(item.id)} aria-pressed={isActive}>
                 <span className={`item-number ${index % 3 === 1 ? "number-soft" : ""}`}>{String(index + 1).padStart(2, "0")}</span>
-                {item.currentProduct?.imageUrl ? <img className="item-thumbnail" src={item.currentProduct.imageUrl} alt="" referrerPolicy="no-referrer" /> : <span className={`item-seal seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true"><span>{item.name.trim().charAt(0).toUpperCase()}</span></span>}
+                {item.productPhoto || item.currentProduct?.imageUrl ? <img className="item-thumbnail" src={item.productPhoto || item.currentProduct?.imageUrl} alt="" referrerPolicy="no-referrer" /> : <span className={`item-seal seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true"><span>{item.name.trim().charAt(0).toUpperCase()}</span></span>}
                 <span className="item-main"><strong>{item.name}</strong><small>{item.category || "Unsorted"}{totalUnits > 1 ? <span> · {totalUnits} units</span> : buys.length > 1 ? <span> · {buys.length} buys</span> : null}</small></span>
                 <span className="item-status">{lastService ? <><small>SERVICE</small><strong>{lastService.date ? ageLabel(lastService.date) + " ago" : "logged"}</strong></> : lastPurchase?.date ? <><small>OWNED</small><strong>{formatAgeFromEvent(item)}</strong></> : <><small>ADDED</small><strong>—</strong></>}</span>
                 <span className="row-arrow" aria-hidden="true"><Icon name="arrow" size={17} /></span>
@@ -430,19 +545,44 @@ export default function Home() {
             <div className="detail-topline"><span className="eyebrow">OBJECT RECORD <span>/ {String(items.findIndex((item) => item.id === selectedItem.id) + 1).padStart(2, "0")}</span></span><button className="icon-button remove-item" onClick={() => removeItem(selectedItem)} aria-label={`Remove ${selectedItem.name}`} title="Remove this thing"><Icon name="trash" size={17} /></button></div>
             <div className="detail-heading"><span className={`detail-seal seal-${(selectedItem.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</span><div><span className="detail-category">{selectedItem.category || "UNCATEGORIZED"}</span><h3>{selectedItem.name}</h3></div></div>
             {selectedItem.note ? <p className="item-note">{selectedItem.note}</p> : null}
-            {selectedItem.productUrl ? <section className={`product-card ${selectedItem.currentProduct?.imageUrl ? "has-product-image" : "no-product-image"}`} aria-label="Product page details">
-              <div className="product-card-heading"><span className="eyebrow">PRODUCT PAGE</span><button className="product-refresh" onClick={() => setProductRefreshToken((value) => value + 1)} aria-label="Refresh current product price" title="Refresh product details"><Icon name="refresh" size={15} /></button></div>
-              {selectedItem.currentProduct?.imageUrl ? <img className="product-image" src={selectedItem.currentProduct.imageUrl} alt={selectedItem.currentProduct.title || selectedItem.name} referrerPolicy="no-referrer" /> : null}
+            <section className={`product-card ${selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl ? "has-product-image" : "no-product-image"}`} aria-label="Product details">
+              <div className="product-card-heading"><span className="eyebrow">PRODUCT DETAILS</span>{selectedItem.productUrl ? <button className="product-refresh" onClick={() => setProductRefreshToken((value) => value + 1)} aria-label="Refresh current product details" title="Refresh product details"><Icon name="refresh" size={17} /></button> : null}</div>
+              {(selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl) ? <img className="product-image" src={selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl} alt={selectedItem.currentProduct?.title || selectedItem.name} referrerPolicy="no-referrer" /> : <div className="product-image-placeholder" aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</div>}
               <div className="product-card-content">
-                <strong className="product-title">{selectedItem.currentProduct?.title || "Current listing"}</strong>
-                {selectedItem.currentProduct?.amount !== undefined ? <div className="product-price">{selectedItem.currentProduct.currency ? formatMoney(selectedItem.currentProduct.amount, selectedItem.currentProduct.currency) : selectedItem.currentProduct.amount.toLocaleString()} <span>listed price</span></div> : <p className="product-price product-no-price">Price not listed</p>}
-                {selectedItem.currentProduct?.fetchedAt ? <span className="product-checked">Checked {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedItem.currentProduct.fetchedAt))}</span> : null}
+                <strong className="product-title">{selectedItem.currentProduct?.title || (selectedItem.productUrl ? "Product listing" : "Add a product link")}</strong>
+                {selectedItem.listedPriceOverride ? <div className="product-price">{formatMoney(selectedItem.listedPriceOverride.amount, selectedItem.listedPriceOverride.currency)} <span>your listed price</span></div> : selectedItem.currentProduct?.amount !== undefined ? <div className="product-price">{selectedItem.currentProduct.currency ? formatMoney(selectedItem.currentProduct.amount, selectedItem.currentProduct.currency) : selectedItem.currentProduct.amount.toLocaleString()} <span>shop price</span></div> : selectedItem.productUrl ? <p className="product-price product-no-price">Price not available</p> : null}
+                {selectedItem.currentProduct?.fetchedAt ? <span className="product-checked">Updated {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedItem.currentProduct.fetchedAt))}</span> : null}
               </div>
-              <a className="product-link" href={selectedItem.productUrl} target="_blank" rel="noreferrer noopener">Open product page <Icon name="arrow" size={14} /></a>
-              {productFetch?.itemId === selectedItem.id && productFetch.status === "loading" ? <p className="product-status" aria-live="polite">Checking the product page…</p> : null}
+              {selectedItem.productUrl ? <a className="product-link" href={selectedItem.productUrl} target="_blank" rel="noreferrer noopener">Open shop page <Icon name="arrow" size={15} /></a> : null}
+              {productFetch?.itemId === selectedItem.id && productFetch.status === "loading" ? <p className="product-status" aria-live="polite">Checking shop…</p> : null}
               {productFetch?.itemId === selectedItem.id && productFetch.status === "error" ? <p className="product-status product-error" role="status">{productFetch.message} <button onClick={() => setProductRefreshToken((value) => value + 1)}>Try again</button></p> : null}
-              <p className="product-help">Price may vary by size or option.</p>
-            </section> : null}
+              <div className="product-controls">
+                <button className="text-button" onClick={() => { setEditingProductLinkId((value) => value === selectedItem.id ? null : selectedItem.id); setProductLinkError(""); }}>{selectedItem.productUrl ? "Change product link" : "Add product link"}</button>
+                <button className="text-button" onClick={() => productPhotoInput.current?.click()}>{selectedItem.productPhoto ? "Change photo" : "Add your photo"}</button>
+                <button className="text-button" onClick={() => { setEditingListedPriceId((value) => value === selectedItem.id ? null : selectedItem.id); setListedPriceError(""); }}>{selectedItem.listedPriceOverride ? "Edit listed price" : "Set listed price"}</button>
+                <input ref={productPhotoInput} className="visually-hidden" type="file" accept="image/*" onChange={chooseProductPhoto} aria-label="Choose a product photo" />
+                {selectedItem.productPhoto ? <button className="text-button" onClick={removeProductPhoto}>Remove photo</button> : null}
+                {selectedItem.listedPriceOverride ? <button className="text-button" onClick={() => { setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, listedPriceOverride: undefined } : item)); setEditingListedPriceId(null); announce("Using the shop price again."); }}>Use shop price</button> : null}
+              </div>
+              {editingProductLinkId === selectedItem.id ? <form className="product-link-form" onSubmit={saveProductLink}>
+                <label className="field"><span>Product link</span><input name="productUrl" type="url" maxLength={2048} defaultValue={selectedItem.productUrl ?? ""} placeholder="https://shop.example.com/product" aria-invalid={Boolean(productLinkError)} /></label>
+                {productLinkError ? <p className="form-error" role="alert">{productLinkError}</p> : null}
+                <div className="product-form-actions"><button className="button button-primary" type="submit">Save link</button><button className="text-button" type="button" onClick={() => { setEditingProductLinkId(null); setProductLinkError(""); }}>Cancel</button></div>
+              </form> : null}
+              {editingListedPriceId === selectedItem.id ? <form className="product-link-form" onSubmit={saveListedPrice}>
+                <label className="field"><span>Current listed price</span><div className="price-input"><input name="listedAmount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={selectedItem.listedPriceOverride?.amount ?? ""} placeholder="Price on the shop page" /><select name="listedCurrency" aria-label="Currency" defaultValue={selectedItem.listedPriceOverride?.currency ?? "INR"}>{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label>
+                {listedPriceError ? <p className="form-error" role="alert">{listedPriceError}</p> : null}
+                <div className="product-form-actions"><button className="button button-primary" type="submit">Save price</button><button className="text-button" type="button" onClick={() => { setEditingListedPriceId(null); setListedPriceError(""); }}>Cancel</button></div>
+              </form> : null}
+              {photoDraftItemId === selectedItem.id && photoDraftFile && photoDraftUrl ? <div className="photo-editor">
+                <div className="photo-crop-window"><img src={photoDraftUrl} alt="Crop preview" style={{ objectPosition: `${50 + photoOffsetX / 2}% ${50 + photoOffsetY / 2}%`, transform: `scale(${photoZoom})` }} /></div>
+                <label className="crop-control"><span>Zoom</span><input type="range" min="1" max="2.8" step="0.01" value={photoZoom} onChange={(event) => setPhotoZoom(Number(event.target.value))} /></label>
+                <label className="crop-control"><span>Horizontal</span><input type="range" min="-100" max="100" step="1" value={photoOffsetX} onChange={(event) => setPhotoOffsetX(Number(event.target.value))} /></label>
+                <label className="crop-control"><span>Vertical</span><input type="range" min="-100" max="100" step="1" value={photoOffsetY} onChange={(event) => setPhotoOffsetY(Number(event.target.value))} /></label>
+                <div className="product-form-actions"><button className="button button-primary" onClick={saveProductPhoto}>Crop & save</button><button className="text-button" onClick={() => { setPhotoDraftFile(null); setPhotoDraftUrl(""); setPhotoDraftItemId(null); }}>Cancel</button></div>
+              </div> : null}
+              {selectedItem.productUrl ? <p className="product-help">Some shops block automatic price reads. You can add a photo and price yourself.</p> : null}
+            </section>
             {(selectedItem.variants?.length || selectedItem.productUrl) ? <section className="variants-panel" aria-label="Product variants">
               <div className="variants-heading"><div><p className="eyebrow">OPTIONS</p><h4>Sizes & options</h4></div><button className="button button-outline" onClick={() => openVariant()}><Icon name="plus" size={15} /> Add option</button></div>
               {selectedItem.variants?.length ? <ul className="variant-list">{selectedItem.variants.map((variant) => <li key={variant.id}>
