@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from "react";
 import type { ItemEvent, TrackedItem } from "@/lib/tracker";
-import { formatDate, formatMoney } from "@/lib/tracker";
+import { fallbackItemImage, formatDate, formatMoney } from "@/lib/tracker";
 
 type CalendarEntry = { item: TrackedItem; event: ItemEvent };
 type CalendarGroup = { item: TrackedItem; events: ItemEvent[] };
@@ -19,7 +19,7 @@ function eventLabel(kind: ItemEvent["kind"]) {
 }
 
 function itemPhoto(item: TrackedItem) {
-  return item.productPhoto || item.currentProduct?.imageUrl;
+  return item.productPhoto || item.currentProduct?.imageUrl || fallbackItemImage(item);
 }
 
 function groupByItem(entries: CalendarEntry[]): CalendarGroup[] {

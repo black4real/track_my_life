@@ -7,7 +7,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "re
 import Link from "next/link";
 import {
   ageLabel, BackupFile, CATEGORIES, detailFields, EventKind, formatDate, formatMoney, ITEM_TYPES, ProductPriceObservation,
-  lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
+  fallbackItemImage, lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
 import { CalendarView } from "@/app/calendar-view";
@@ -236,7 +236,9 @@ export default function Home() {
     .filter((item) => `${item.name} ${item.category ?? ""} ${item.itemType ?? ""} ${item.note ?? ""}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name)), [items, category, search]);
   const selectedItem = visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null;
+  const selectedItemImage = selectedItem ? selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl || fallbackItemImage(selectedItem) : undefined;
   const addAttributeFields = detailFields(addCategory, addItemType);
+  const addPreviewImage = addImageUrl || fallbackItemImage({ name: addName, category: addCategory, itemType: addItemType });
   const selectedPurchaseFields = selectedItem ? detailFields(selectedItem.category, selectedItem.itemType).purchase : [];
 
   useEffect(() => {
@@ -725,7 +727,7 @@ export default function Home() {
         {addPreviewStatus === "error" ? <p className="product-status product-error" role="status">This shop didn’t provide a readable product preview. Some stores block automatic reads. You can still add the name, photo link, and listed price yourself.</p> : null}
         {(addPreview || addImageUrl || addListedPrice || (addProductUrl && addPreviewStatus !== "loading")) ? <section className="add-product-preview" aria-label="Product details preview">
           <div className="add-preview-heading"><span className="eyebrow">PRODUCT PREVIEW</span><span>{addPreview ? "Review and edit before saving" : "Manual details"}</span></div>
-          <div className="add-preview-content">{addImageUrl ? <img src={addImageUrl} alt="Product preview" referrerPolicy="no-referrer" /> : <div className="add-preview-placeholder" aria-hidden="true">{addName.trim().charAt(0).toUpperCase() || "＋"}</div>}
+          <div className="add-preview-content">{addPreviewImage ? <img src={addPreviewImage} alt={addImageUrl ? "Product preview" : "Grooming tools"} referrerPolicy="no-referrer" /> : <div className="add-preview-placeholder" aria-hidden="true">{addName.trim().charAt(0).toUpperCase() || "＋"}</div>}
             <div className="add-preview-fields">
               <label className="field"><span>Product photo URL</span><input value={addImageUrl} onChange={(event) => setAddImageUrl(event.target.value)} type="url" placeholder="https://…" /></label>
               <label className="field"><span>Current listed price</span><div className="price-input"><input type="number" min="0" step="0.01" inputMode="decimal" value={addListedPrice} placeholder="Not available" onChange={(event) => { setAddListedPrice(event.target.value); setAddPriceEdited(true); }} /><select aria-label="Listed price currency" value={addListedCurrency} onChange={(event) => { setAddListedCurrency(event.target.value); setAddPriceEdited(true); }}>{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label>
@@ -866,7 +868,7 @@ export default function Home() {
               const isActive = item.id === (selectedItem?.id ?? visibleItems[0]?.id);
               return <button className={`item-row ${isActive ? "selected" : ""}`} key={item.id} onClick={() => setSelectedId(item.id)} aria-pressed={isActive}>
                 <span className={`item-number ${index % 3 === 1 ? "number-soft" : ""}`}>{String(index + 1).padStart(2, "0")}</span>
-                {item.productPhoto || item.currentProduct?.imageUrl ? <img className="item-thumbnail" src={item.productPhoto || item.currentProduct?.imageUrl} alt="" referrerPolicy="no-referrer" /> : <span className={`item-seal seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true"><span>{item.name.trim().charAt(0).toUpperCase()}</span></span>}
+                {item.productPhoto || item.currentProduct?.imageUrl || fallbackItemImage(item) ? <img className="item-thumbnail" src={item.productPhoto || item.currentProduct?.imageUrl || fallbackItemImage(item)} alt="" referrerPolicy="no-referrer" /> : <span className={`item-seal seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true"><span>{item.name.trim().charAt(0).toUpperCase()}</span></span>}
                 <span className="item-main"><strong>{item.name}</strong><small>{[item.category || "Unsorted", item.itemType].filter(Boolean).join(" · ")}{totalUnits > 1 ? <span> · {totalUnits} units</span> : buys.length > 1 ? <span> · {buys.length} buys</span> : null}</small></span>
                 <span className="item-status">{lastService ? <><small>SERVICE</small><strong>{lastService.date ? ageLabel(lastService.date) + " ago" : "logged"}</strong></> : lastPurchase?.date ? <><small>OWNED</small><strong>{formatAgeFromEvent(item)}</strong></> : <><small>ADDED</small><strong>—</strong></>}</span>
                 <span className="row-arrow" aria-hidden="true"><Icon name="arrow" size={17} /></span>
@@ -884,9 +886,9 @@ export default function Home() {
             <div className="detail-heading"><span className={`detail-seal seal-${(selectedItem.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</span><div><span className="detail-category">{[selectedItem.category || "UNCATEGORIZED", selectedItem.itemType].filter(Boolean).join(" · ")}</span><h3>{selectedItem.name}</h3></div></div>
             {selectedItem.note ? <p className="item-note">{selectedItem.note}</p> : null}
             {selectedItem.specifications && Object.entries(selectedItem.specifications).some(([, value]) => value) ? <dl className="item-specifications">{Object.entries(selectedItem.specifications).filter(([, value]) => value).map(([key, value]) => <div key={key}><dt>{attributeLabel(key)}</dt><dd>{value}</dd></div>)}</dl> : null}
-            <section className={`product-card ${selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl ? "has-product-image" : "no-product-image"}`} aria-label="Product details">
+            <section className={`product-card ${selectedItemImage ? "has-product-image" : "no-product-image"}`} aria-label="Product details">
               <div className="product-card-heading"><span className="eyebrow">{selectedItem.storeName || "PRODUCT DETAILS"}</span>{selectedItem.productUrl ? <button className="product-refresh" onClick={() => setProductRefreshToken((value) => value + 1)} aria-label="Refresh current product details" title="Refresh product details"><Icon name="refresh" size={17} /></button> : null}</div>
-              {(selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl) ? <img className="product-image" src={selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl} alt={selectedItem.currentProduct?.title || selectedItem.name} referrerPolicy="no-referrer" /> : <div className="product-image-placeholder" aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</div>}
+              {selectedItemImage ? <img className="product-image" src={selectedItemImage} alt={selectedItem.currentProduct?.title || selectedItem.name} referrerPolicy="no-referrer" /> : <div className="product-image-placeholder" aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</div>}
               <div className="product-card-content">
                 <strong className="product-title">{selectedItem.currentProduct?.title || (selectedItem.productUrl ? "Product listing" : "Add a product link")}</strong>
                 {selectedItem.listedPriceOverride ? <div className="product-price">{formatMoney(selectedItem.listedPriceOverride.amount, selectedItem.listedPriceOverride.currency)} <span>your listed price</span></div> : selectedItem.currentProduct?.amount !== undefined ? <div className="product-price">{selectedItem.currentProduct.currency ? formatMoney(selectedItem.currentProduct.amount, selectedItem.currentProduct.currency) : selectedItem.currentProduct.amount.toLocaleString()} <span>{selectedItem.currentProduct.priceFetchedAt && selectedItem.currentProduct.fetchedAt && selectedItem.currentProduct.priceFetchedAt !== selectedItem.currentProduct.fetchedAt ? "last known shop price" : "shop price"}</span></div> : selectedItem.productUrl ? <p className="product-price product-no-price">Price not available</p> : null}

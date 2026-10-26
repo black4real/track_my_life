@@ -45,6 +45,12 @@ export type TrackedItem = {
   events: ItemEvent[];
 };
 
+export function fallbackItemImage(item: Pick<TrackedItem, "name" | "category" | "itemType">) {
+  const details = `${item.name} ${item.category ?? ""} ${item.itemType ?? ""}`.toLowerCase();
+  if (item.category?.toLowerCase().includes("groom") || /hair\s*cut|haircut|barber|grooming/.test(details)) return "/images/grooming-mark.svg";
+  return undefined;
+}
+
 export type ProductPriceObservation = {
   id: string;
   amount: number;
