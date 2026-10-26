@@ -9,6 +9,10 @@ import {
   ageLabel, BackupFile, CATEGORIES, EventKind, formatDate, formatMoney,
   lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
 } from "@/lib/tracker";
+import { AuthPanel } from "@/app/auth-panel";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { importTrackerItems, loadTrackerItems, makeCloudCompatibleItems, syncTrackerItems } from "@/lib/supabase/tracker";
+import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"];
 const THEME_STORAGE_KEY = "kept-theme-v1";
@@ -42,7 +46,13 @@ function formatAgeFromEvent(item: TrackedItem) {
 
 export default function Home() {
   const [items, setItems] = useState<TrackedItem[]>([]);
-  const [ready, setReady] = useState(false);
+  const supabaseConfigured = isSupabaseConfigured();
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(!supabaseConfigured);
+  const [ready, setReady] = useState(!supabaseConfigured);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [migrationItems, setMigrationItems] = useState<TrackedItem[] | null>(null);
+  const [migrationBusy, setMigrationBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All things");
@@ -67,8 +77,49 @@ export default function Home() {
   const nameInput = useRef<HTMLInputElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const productPhotoInput = useRef<HTMLInputElement>(null);
-
+  const lastSyncedItems = useRef<TrackedItem[]>([]);
+  const syncQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
+    if (supabaseConfigured) {
+      const supabase = createClient();
+      let active = true;
+      let loadedUserId: string | null = null;
+      const loadUser = async (nextUser: User | null) => {
+        if (!active) return;
+        const userId = nextUser?.id ?? null;
+        setUser(nextUser);
+        setAuthReady(true);
+        if (!userId) {
+          loadedUserId = null;
+          setItems([]);
+          setCloudReady(false);
+          setReady(true);
+          return;
+        }
+        if (loadedUserId === userId) return;
+        loadedUserId = userId;
+        setCloudReady(false); setReady(false);
+        try {
+          const cloudItems = await loadTrackerItems(supabase, userId);
+          if (!active) return;
+          lastSyncedItems.current = cloudItems;
+          setItems(cloudItems);
+          setCloudReady(true);
+          const decisionKey = `kept-import-asked-${userId}`;
+          const saved = localStorage.getItem(STORAGE_KEY);
+          const localItems: unknown = saved ? JSON.parse(saved) : [];
+          if (!localStorage.getItem(decisionKey) && validItems(localItems) && localItems.length) setMigrationItems(localItems);
+          setReady(true);
+        } catch (error) {
+          if (active) { setNotice(error instanceof Error ? error.message : "Could not load your saved records."); setReady(true); }
+        }
+      };
+      supabase.auth.getUser().then(({ data }: { data: { user: User | null } }) => loadUser(data.user));
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+        queueMicrotask(() => loadUser(session?.user ?? null));
+      });
+      return () => { active = false; subscription.unsubscribe(); };
+    }
     const timeout = window.setTimeout(() => {
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -82,7 +133,7 @@ export default function Home() {
       setReady(true);
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, []);
+  }, [supabaseConfigured]);
 
   useEffect(() => {
     let savedTheme: string | null = null;
@@ -107,8 +158,26 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }, [items, ready]);
+    if (!ready) return;
+    if (!supabaseConfigured) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      return;
+    }
+    if (!user || !cloudReady) return;
+    if (JSON.stringify(lastSyncedItems.current) === JSON.stringify(items)) return;
+    const previous = lastSyncedItems.current;
+    const next = items;
+    lastSyncedItems.current = next;
+    const supabase = createClient();
+    syncQueue.current = syncQueue.current.then(async () => {
+      const photoPaths = await syncTrackerItems(supabase, user.id, previous, next);
+      lastSyncedItems.current = next.map((item) => photoPaths.has(item.id) ? { ...item, productPhotoPath: photoPaths.get(item.id) } : item);
+      setItems((current) => current.map((item) => photoPaths.has(item.id) ? { ...item, productPhotoPath: photoPaths.get(item.id) } : item));
+    }).catch((error: unknown) => {
+      lastSyncedItems.current = previous;
+      setNotice(error instanceof Error ? `Could not save to your account: ${error.message}` : "Could not save to your account. Try again.");
+    });
+  }, [items, ready, user, cloudReady, supabaseConfigured]);
 
   const categories = useMemo(() => [...new Set(items.map((item) => item.category).filter((value): value is string => Boolean(value)))], [items]);
   const visibleItems = useMemo(() => items
@@ -370,7 +439,7 @@ export default function Home() {
       context.drawImage(image, sourceX, sourceY, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
       image.close();
       const productPhoto = canvas.toDataURL("image/jpeg", 0.78);
-      setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, productPhoto } : item));
+      setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, productPhoto, productPhotoPath: undefined } : item));
       setPhotoDraftFile(null);
       setPhotoDraftUrl("");
       setPhotoDraftItemId(null);
@@ -382,7 +451,7 @@ export default function Home() {
 
   function removeProductPhoto() {
     if (!selectedItem) return;
-    setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, productPhoto: undefined } : item));
+    setItems((current) => current.map((item) => item.id === selectedItem.id ? { ...item, productPhoto: undefined, productPhotoPath: undefined } : item));
     setPhotoDraftFile(null);
     setPhotoDraftUrl("");
     setPhotoDraftItemId(null);
@@ -402,8 +471,20 @@ export default function Home() {
     announce("Timeline entry removed.");
   }
 
-  function exportBackup() {
-    const backup: BackupFile = { format: "kept-backup", version: 1, exportedAt: new Date().toISOString(), items };
+  async function exportBackup() {
+    const backupItems = await Promise.all(items.map(async (item) => {
+      if (!item.productPhoto || item.productPhoto.startsWith("data:image/")) return item;
+      try {
+        const response = await fetch(item.productPhoto);
+        if (!response.ok) return { ...item, productPhoto: undefined };
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob);
+        });
+        return { ...item, productPhoto: dataUrl };
+      } catch { return { ...item, productPhoto: undefined }; }
+    }));
+    const backup: BackupFile = { format: "kept-backup", version: 1, exportedAt: new Date().toISOString(), items: backupItems };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -413,15 +494,45 @@ export default function Home() {
     announce("Your backup has been downloaded.");
   }
 
+  async function importLocalRecords() {
+    if (!user || !migrationItems || migrationBusy) return;
+    setMigrationBusy(true);
+    try {
+      const existingIds = new Set(items.map((item) => item.id));
+      const toImport = makeCloudCompatibleItems(migrationItems.filter((item) => !existingIds.has(item.id)));
+      const photoPaths = await importTrackerItems(createClient(), user.id, toImport);
+      const merged = [...items, ...toImport.map((item) => ({ ...item, productPhotoPath: photoPaths.get(item.id) }))];
+      lastSyncedItems.current = merged;
+      setItems(merged);
+      localStorage.setItem(`kept-import-asked-${user.id}`, "done");
+      setMigrationItems(null);
+      setSelectedId(toImport[0]?.id ?? items[0]?.id ?? null);
+      announce(toImport.length ? `${toImport.length} local record${toImport.length === 1 ? "" : "s"} added to your account.` : "Those records are already in your account.");
+    } catch (error) {
+      announce(error instanceof Error ? `Import stopped. Your browser copy is safe. ${error.message}` : "Import stopped. Your browser copy is safe; try again.");
+    } finally { setMigrationBusy(false); }
+  }
+
+  function deferLocalImport() {
+    if (user) localStorage.setItem(`kept-import-asked-${user.id}`, "done");
+    setMigrationItems(null);
+  }
+
+  async function signOut() {
+    const { error } = await createClient().auth.signOut();
+    if (error) announce(error.message);
+  }
+
   async function importBackup(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text()) as Partial<BackupFile>;
       if (parsed.format !== "kept-backup" || parsed.version !== 1 || !validItems(parsed.items)) throw new Error("invalid backup");
-      if (!window.confirm(`Restore ${parsed.items.length} item${parsed.items.length === 1 ? "" : "s"}? This replaces the records in this browser.`)) return;
-      setItems(parsed.items);
-      setSelectedId(parsed.items[0]?.id ?? null);
+      if (!window.confirm(`Restore ${parsed.items.length} item${parsed.items.length === 1 ? "" : "s"}? This replaces the records ${user ? "in your account" : "in this browser"}.`)) return;
+      const restored = user ? makeCloudCompatibleItems(parsed.items) : parsed.items;
+      setItems(restored);
+      setSelectedId(restored[0]?.id ?? null);
       setSearch("");
       setCategory("All things");
       announce("Backup restored.");
@@ -472,6 +583,7 @@ export default function Home() {
   </section> : null;
 
   if (!ready) return <main className="loading-screen" aria-label="Loading your things"><span className="brand-mark">k.</span></main>;
+  if (supabaseConfigured && authReady && !user) return <AuthPanel />;
 
   return (
     <main className="app-shell">
@@ -487,6 +599,7 @@ export default function Home() {
             <Icon name="download" size={16} /><span>Back up</span>
           </button>
           <button className="quiet-button restore-button" onClick={() => importInput.current?.click()}><Icon name="upload" size={16} /><span>Restore</span></button>
+          {user ? <button className="quiet-button sign-out-button" onClick={signOut} title={`Sign out ${user.email ?? ""}`}><span>Sign out</span></button> : null}
           <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={importBackup} aria-label="Choose a Kept backup file" />
         </div>
       </header>
@@ -498,6 +611,13 @@ export default function Home() {
           <p className="intro-description">Remember what you bought, how it’s holding up, and when it needs care.</p>
         </div>
       </section>
+
+      {!supabaseConfigured ? <p className="local-mode-note">Saved on this browser. Add Supabase details to enable account sign-in and cloud sync.</p> : null}
+
+      {migrationItems ? <section className="migration-card" aria-labelledby="migration-title">
+        <div><p className="eyebrow">YOUR BROWSER HAS SAVED RECORDS</p><h2 id="migration-title">Bring your list into this account?</h2><p>{migrationItems.length} item{migrationItems.length === 1 ? "" : "s"}{migrationItems.some((item) => item.productPhoto || item.productPhotoPath) ? `, including ${migrationItems.filter((item) => item.productPhoto || item.productPhotoPath).length} photo${migrationItems.filter((item) => item.productPhoto || item.productPhotoPath).length === 1 ? "" : "s"}` : ""}. Purchases, notes, and product links will be copied. Your browser copy stays here.</p></div>
+        <div className="migration-actions"><button className="button button-primary" onClick={importLocalRecords} disabled={migrationBusy}>{migrationBusy ? "Importing…" : "Import records"}</button><button className="text-button" onClick={deferLocalImport} disabled={migrationBusy}>Not now</button></div>
+      </section> : null}
 
       {(items.length > 0) && <section className="summary-strip" aria-label="Your tracker at a glance">
         <div className="summary-cell"><strong className="summary-value">{items.length}</strong><span className="summary-caption">{items.length === 1 ? "thing in your list" : "things in your list"}</span></div>

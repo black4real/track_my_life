@@ -20,6 +20,7 @@ export type TrackedItem = {
   note?: string;
   productUrl?: string;
   productPhoto?: string;
+  productPhotoPath?: string;
   listedPriceOverride?: { amount: number; currency: string };
   currentProduct?: {
     title?: string;
@@ -65,6 +66,7 @@ export function validItems(value: unknown): value is TrackedItem[] {
     typeof item.createdAt === "string" && Array.isArray(item.events) &&
     (item.productUrl === undefined || (typeof item.productUrl === "string" && item.productUrl.length <= 2048 && isSafeHttpsUrl(item.productUrl))) &&
     (item.productPhoto === undefined || (typeof item.productPhoto === "string" && item.productPhoto.length <= 1_500_000 && /^data:image\/(?:jpeg|webp|png);base64,/i.test(item.productPhoto))) &&
+    (item.productPhotoPath === undefined || (typeof item.productPhotoPath === "string" && item.productPhotoPath.length <= 500 && !item.productPhotoPath.startsWith("/") && !item.productPhotoPath.includes(".."))) &&
     (item.listedPriceOverride === undefined || (
       item.listedPriceOverride && typeof item.listedPriceOverride === "object" &&
       typeof item.listedPriceOverride.amount === "number" && Number.isFinite(item.listedPriceOverride.amount) && item.listedPriceOverride.amount >= 0 &&
@@ -145,5 +147,12 @@ export function lastOfKind(item: TrackedItem, kind: EventKind) {
 }
 
 export function makeId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
