@@ -10,6 +10,8 @@ import {
   lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
+import { CalendarView } from "@/app/calendar-view";
+import { detectRetailer, RETAILERS } from "@/lib/retailers";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { importTrackerItems, loadTrackerItems, makeCloudCompatibleItems, syncTrackerItems } from "@/lib/supabase/tracker";
 import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
@@ -18,6 +20,7 @@ const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"];
 const THEME_STORAGE_KEY = "kept-theme-v1";
 const PROFILE_MASCOTS = ["sprout", "moth", "cat", "moon", "finch", "pebble"] as const;
 type ProfileMascot = typeof PROFILE_MASCOTS[number];
+type AddProductPreview = { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; storeName?: string };
 
 function validMascot(value: unknown): value is ProfileMascot {
   return typeof value === "string" && PROFILE_MASCOTS.includes(value as ProfileMascot);
@@ -62,6 +65,7 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All things");
+  const [view, setView] = useState<"library" | "calendar">("library");
   const [modal, setModal] = useState<"item" | "event" | "variant" | null>(null);
   const [formError, setFormError] = useState("");
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
@@ -70,6 +74,17 @@ export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addNameTouched, setAddNameTouched] = useState(false);
+  const [addProductUrl, setAddProductUrl] = useState("");
+  const [addStoreName, setAddStoreName] = useState("");
+  const [addStoreEdited, setAddStoreEdited] = useState(false);
+  const [addPreview, setAddPreview] = useState<AddProductPreview | null>(null);
+  const [addPreviewStatus, setAddPreviewStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [addImageUrl, setAddImageUrl] = useState("");
+  const [addListedPrice, setAddListedPrice] = useState("");
+  const [addListedCurrency, setAddListedCurrency] = useState("INR");
+  const [addPriceEdited, setAddPriceEdited] = useState(false);
   const [productFetch, setProductFetch] = useState<{ itemId: string; status: "loading" | "error"; message?: string } | null>(null);
   const [productRefreshToken, setProductRefreshToken] = useState(0);
   const [editingProductLinkId, setEditingProductLinkId] = useState<string | null>(null);
@@ -212,10 +227,10 @@ export default function Home() {
       cache: "no-store",
       signal: controller.signal,
     }).then(async (response) => {
-      const result = await response.json() as { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; error?: string };
+      const result = await response.json() as { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; storeName?: string; error?: string };
       if (!response.ok) throw new Error(result.error || "Could not read that product page.");
       setItems((current) => current.map((item) => item.id === itemId && item.productUrl === productUrl
-        ? { ...item, currentProduct: { title: result.title, imageUrl: result.imageUrl, amount: result.amount, currency: result.currency, fetchedAt: result.fetchedAt } }
+        ? { ...item, storeName: item.storeName || result.storeName, currentProduct: { title: result.title, imageUrl: result.imageUrl, amount: result.amount, currency: result.currency, fetchedAt: result.fetchedAt } }
         : item));
       setProductFetch(null);
     }).catch((error: unknown) => {
@@ -255,10 +270,56 @@ export default function Home() {
     try { localStorage.setItem(THEME_STORAGE_KEY, nextTheme); } catch { announce("This browser could not save your theme choice."); }
   }
 
+  function openAddItem() {
+    setAddName(""); setAddNameTouched(false); setAddProductUrl(""); setAddStoreName(""); setAddStoreEdited(false);
+    setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddListedCurrency("INR"); setAddPriceEdited(false);
+    setFormError(""); setModal("item");
+  }
+
+  function changeAddProductUrl(value: string) {
+    setAddProductUrl(value);
+    setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddPriceEdited(false);
+    setAddStoreEdited(false);
+    const retailer = detectRetailer(value);
+    if (retailer) setAddStoreName(retailer.name);
+    else {
+      try { setAddStoreName(new URL(value).hostname.replace(/^www\./i, "")); }
+      catch { setAddStoreName(""); }
+    }
+  }
+
+  async function previewAddProduct() {
+    let url: URL;
+    try {
+      url = new URL(addProductUrl);
+      if (url.protocol !== "https:" || url.username || url.password || !url.hostname.includes(".")) throw new Error("invalid URL");
+    } catch {
+      setFormError("Add a full product link starting with https:// before previewing it.");
+      return;
+    }
+    setFormError(""); setAddPreviewStatus("loading"); setAddPreview(null);
+    try {
+      const response = await fetch("/api/product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url.toString() }), cache: "no-store" });
+      const result = await response.json() as AddProductPreview & { error?: string };
+      if (!response.ok) throw new Error(result.error || "This store could not be read right now.");
+      setAddPreview(result);
+      setAddImageUrl(result.imageUrl ?? "");
+      if (!addPriceEdited) {
+        setAddListedPrice(result.amount === undefined ? "" : String(result.amount));
+        setAddListedCurrency(result.currency || "INR");
+      }
+      if (!addNameTouched && result.title) setAddName(result.title.slice(0, 80));
+      if (!addStoreEdited && result.storeName) setAddStoreName(result.storeName);
+      setAddPreviewStatus("idle");
+    } catch {
+      setAddPreviewStatus("error");
+    }
+  }
+
   function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const name = String(data.get("name") ?? "").trim();
+    const name = addName.trim() || String(data.get("name") ?? "").trim();
     if (!name) {
       setFormError("Please add a name before saving.");
       nameInput.current?.focus();
@@ -280,9 +341,23 @@ export default function Home() {
     const amountString = String(data.get("amount") ?? "").trim();
     const amount = amountString ? Number(amountString) : undefined;
     const currency = String(data.get("currency") || "INR");
+    const listedValue = addListedPrice.trim();
+    const listedAmount = listedValue ? Number(listedValue) : undefined;
+    if (listedValue && (!Number.isFinite(listedAmount) || (listedAmount ?? -1) < 0)) {
+      setFormError("Enter a valid listed price, or leave it blank.");
+      return;
+    }
+    if (addImageUrl) {
+      try { const imageUrl = new URL(addImageUrl); if (imageUrl.protocol !== "https:") throw new Error("invalid image"); }
+      catch { setFormError("Use an image link starting with https://."); return; }
+    }
     const now = new Date().toISOString();
     const item: TrackedItem = {
-      id: makeId(), name, category: categoryValue || undefined, note: note || undefined, productUrl: productUrl || undefined, createdAt: now,
+      id: makeId(), name, category: categoryValue || undefined, note: note || undefined, productUrl: productUrl || undefined,
+      storeName: addStoreName.trim() || detectRetailer(productUrl)?.name || undefined,
+      currentProduct: addPreview ? { title: addName.trim() || addPreview.title || name, imageUrl: addImageUrl || undefined, amount: addPreview.amount, currency: addPreview.currency, fetchedAt: addPreview.fetchedAt } : (addImageUrl || listedAmount !== undefined ? { title: addName.trim() || name, imageUrl: addImageUrl || undefined } : undefined),
+      listedPriceOverride: addPriceEdited && listedAmount !== undefined ? { amount: listedAmount, currency: addListedCurrency } : undefined,
+      createdAt: now,
       events: date || amount !== undefined ? [{ id: makeId(), kind: "purchase", date: date || undefined, amount, currency: amount !== undefined ? currency : undefined, createdAt: now }] : [],
     };
     setItems((current) => [...current, item]);
@@ -291,6 +366,7 @@ export default function Home() {
     setSearch("");
     setModal(null);
     setFormError("");
+    setAddName(""); setAddNameTouched(false); setAddProductUrl(""); setAddStoreName(""); setAddStoreEdited(false); setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddPriceEdited(false);
     event.currentTarget.reset();
     announce(`${name} added to your things.`);
   }
@@ -385,7 +461,7 @@ export default function Home() {
       }
     }
     setItems((current) => current.map((item) => item.id === selectedItem.id
-      ? { ...item, productUrl: value || undefined, currentProduct: value === item.productUrl ? item.currentProduct : undefined }
+      ? { ...item, productUrl: value || undefined, storeName: value ? detectRetailer(value)?.name || (() => { try { return new URL(value).hostname.replace(/^www\./i, ""); } catch { return undefined; } })() : undefined, currentProduct: value === item.productUrl ? item.currentProduct : undefined }
       : item));
     setProductLinkError("");
     setEditingProductLinkId(null);
@@ -567,13 +643,28 @@ export default function Home() {
     <p className="dialog-intro">Only the name is needed. Fill in anything else you remember.</p>
     {formError ? <p className="form-error" id="item-form-error" role="alert">{formError}</p> : null}
     <form onSubmit={saveItem} className="entry-form" noValidate>
-      <label className="field"><span>Name <b>REQUIRED</b></span><input ref={nameInput} name="name" maxLength={80} autoFocus placeholder="e.g. Everyday watch" aria-required="true" aria-invalid={formError === "Please add a name before saving."} aria-describedby={formError === "Please add a name before saving." ? "item-form-error" : undefined} onChange={() => setFormError("")} /></label>
+      <label className="field"><span>Thing name <b>REQUIRED</b></span><input ref={nameInput} name="name" value={addName} maxLength={80} autoFocus placeholder="e.g. Everyday watch" aria-required="true" aria-invalid={formError === "Please add a name before saving."} aria-describedby={formError === "Please add a name before saving." ? "item-form-error" : undefined} onChange={(event) => { setAddName(event.target.value); setAddNameTouched(true); setFormError(""); }} /></label>
       <label className="field"><span>Category <b>OPTIONAL</b></span><select name="category" defaultValue=""><option value="">Choose if useful</option>{CATEGORIES.map((option) => <option key={option}>{option}</option>)}</select></label>
-      <label className="field"><span>Product link <b>OPTIONAL</b></span><input name="productUrl" type="url" maxLength={2048} placeholder="https://shop.example.com/product" aria-invalid={formError.startsWith("Add a full product link")} /><small className="field-hint">Kept checks public product pages for a photo and listed price when you open this record.</small></label>
+      <div className="shop-link-block">
+        <label className="field"><span>Product link <b>OPTIONAL</b></span><input name="productUrl" type="url" value={addProductUrl} maxLength={2048} placeholder="Paste a product page link" aria-invalid={formError.startsWith("Add a full product link")} onChange={(event) => { changeAddProductUrl(event.target.value); setFormError(""); }} /><small className="field-hint">Paste a link from a shop. We’ll try to find its product details.</small></label>
+        <label className="field"><span>Shop <b>SEARCH OR TYPE</b></span><input value={addStoreName} onChange={(event) => { setAddStoreName(event.target.value); setAddStoreEdited(true); }} list="retailer-options" placeholder="Choose or type a shop name" /><datalist id="retailer-options">{RETAILERS.map((retailer) => <option key={retailer.name} value={retailer.name}>{retailer.group}</option>)}</datalist></label>
+        <button className="button button-outline preview-product-button" type="button" onClick={previewAddProduct} disabled={!addProductUrl || addPreviewStatus === "loading"}><Icon name="refresh" size={15} />{addPreviewStatus === "loading" ? "Checking product…" : "Find product details"}</button>
+        {addPreviewStatus === "error" ? <p className="product-status product-error" role="status">Couldn’t read this shop page. You can still add the name, photo link, and price yourself.</p> : null}
+        {(addPreview || addImageUrl || addListedPrice || (addProductUrl && addPreviewStatus !== "loading")) ? <section className="add-product-preview" aria-label="Product details preview">
+          <div className="add-preview-heading"><span className="eyebrow">PRODUCT PREVIEW</span><span>{addPreview ? "Review and edit before saving" : "Manual details"}</span></div>
+          <div className="add-preview-content">{addImageUrl ? <img src={addImageUrl} alt="Product preview" referrerPolicy="no-referrer" /> : <div className="add-preview-placeholder" aria-hidden="true">{addName.trim().charAt(0).toUpperCase() || "＋"}</div>}
+            <div className="add-preview-fields">
+              <label className="field"><span>Product photo URL</span><input value={addImageUrl} onChange={(event) => setAddImageUrl(event.target.value)} type="url" placeholder="https://…" /></label>
+              <label className="field"><span>Current listed price</span><div className="price-input"><input type="number" min="0" step="0.01" inputMode="decimal" value={addListedPrice} placeholder="Not available" onChange={(event) => { setAddListedPrice(event.target.value); setAddPriceEdited(true); }} /><select aria-label="Listed price currency" value={addListedCurrency} onChange={(event) => { setAddListedCurrency(event.target.value); setAddPriceEdited(true); }}>{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label>
+            </div>
+          </div>
+          {addPreview?.amount !== undefined ? <small className="field-hint">Listed price found on the shop page. Enter what you actually paid below.</small> : null}
+        </section> : null}
+      </div>
       <div className="form-subheading"><span>FIRST PURCHASE</span><span>ALL OPTIONAL</span></div>
       <div className="field-pair"><label className="field"><span>Date</span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label><label className="field"><span>What you paid</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label></div>
       <label className="field"><span>A note <b>OPTIONAL</b></span><textarea name="note" rows={2} maxLength={240} placeholder="Color, where you got it, anything to remember…" /></label>
-      <div className="dialog-footer"><span>Your record stays in this browser.</span><button className="button button-primary" type="submit">Save this thing <Icon name="arrow" size={16} /></button></div>
+      <div className="dialog-footer"><span>{user ? "Saved to your account." : "Saved in this browser."}</span><button className="button button-primary" type="submit">Save this thing <Icon name="arrow" size={16} /></button></div>
     </form>
   </section> : null;
 
@@ -606,7 +697,7 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <a className="skip-link" href="#library">Skip to your things</a>
+      <a className="skip-link" href="#main-content">Skip to page content</a>
       <header className="topbar">
         <Link className="wordmark" href="/" aria-label="Kept, home"><span className="brand-mark">k.</span><span>kept</span></Link>
         <div className="topbar-note"><span className="status-dot" /> A small record of what stays</div>
@@ -638,6 +729,13 @@ export default function Home() {
         </div>
       </header>
 
+      <nav className="view-switch" aria-label="Main views">
+        <button type="button" className={view === "library" ? "active" : ""} aria-current={view === "library" ? "page" : undefined} onClick={() => setView("library")}>Library</button>
+        <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => setView("calendar")}>Calendar</button>
+      </nav>
+
+      <div id="main-content">
+      {view === "library" ? <>
       <section className="intro" aria-labelledby="page-title">
         <div className="intro-copy">
           <p className="eyebrow">A LITTLE MORE AWARE OF WHAT YOU OWN</p>
@@ -663,7 +761,7 @@ export default function Home() {
         <div className="library-column">
           <div className="section-heading">
             <div><p className="eyebrow section-eyebrow">YOUR LIBRARY</p><h2 id="library-title">Your things<span className="period">.</span></h2></div>
-            {items.length ? <button className="button button-primary add-button" onClick={() => setModal("item")}><Icon name="plus" size={17} /><span>Add a thing</span></button> : null}
+            {items.length ? <button className="button button-primary add-button" onClick={openAddItem}><Icon name="plus" size={17} /><span>Add a thing</span></button> : null}
           </div>
           {itemForm}
           {items.length ? <div className="library-tools">
@@ -688,7 +786,7 @@ export default function Home() {
                 <span className="row-arrow" aria-hidden="true"><Icon name="arrow" size={17} /></span>
               </button>;
             }) : items.length ? <div className="no-results"><span className="empty-glyph">⌕</span><strong>No matches in this index.</strong><span>Try another word or category.</span><button className="text-button" onClick={() => { setSearch(""); setCategory("All things"); }}>Clear filters</button></div> : modal === "item" ? null : <div className="empty-state">
-              <p className="eyebrow">YOUR LIST STARTS HERE</p><h3>Add the first thing you want to remember.</h3><p>A name is enough. Dates, prices, and notes can come later.</p><button className="button button-primary empty-add" onClick={() => setModal("item")}><Icon name="plus" size={17} /> Add a thing</button>
+              <p className="eyebrow">YOUR LIST STARTS HERE</p><h3>Add the first thing you want to remember.</h3><p>A name is enough. Dates, prices, and notes can come later.</p><button className="button button-primary empty-add" onClick={openAddItem}><Icon name="plus" size={17} /> Add a thing</button>
             </div>}
           </div>
           {items.length ? <div className="list-footer"><span>ONE LINE AT A TIME</span><span>{visibleItems.length.toString().padStart(2, "0")} / {items.length.toString().padStart(2, "0")}</span></div> : null}
@@ -700,7 +798,7 @@ export default function Home() {
             <div className="detail-heading"><span className={`detail-seal seal-${(selectedItem.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</span><div><span className="detail-category">{selectedItem.category || "UNCATEGORIZED"}</span><h3>{selectedItem.name}</h3></div></div>
             {selectedItem.note ? <p className="item-note">{selectedItem.note}</p> : null}
             <section className={`product-card ${selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl ? "has-product-image" : "no-product-image"}`} aria-label="Product details">
-              <div className="product-card-heading"><span className="eyebrow">PRODUCT DETAILS</span>{selectedItem.productUrl ? <button className="product-refresh" onClick={() => setProductRefreshToken((value) => value + 1)} aria-label="Refresh current product details" title="Refresh product details"><Icon name="refresh" size={17} /></button> : null}</div>
+              <div className="product-card-heading"><span className="eyebrow">{selectedItem.storeName || "PRODUCT DETAILS"}</span>{selectedItem.productUrl ? <button className="product-refresh" onClick={() => setProductRefreshToken((value) => value + 1)} aria-label="Refresh current product details" title="Refresh product details"><Icon name="refresh" size={17} /></button> : null}</div>
               {(selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl) ? <img className="product-image" src={selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl} alt={selectedItem.currentProduct?.title || selectedItem.name} referrerPolicy="no-referrer" /> : <div className="product-image-placeholder" aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</div>}
               <div className="product-card-content">
                 <strong className="product-title">{selectedItem.currentProduct?.title || (selectedItem.productUrl ? "Product listing" : "Add a product link")}</strong>
@@ -766,6 +864,8 @@ export default function Home() {
           </div>
         </aside> : null}
       </section>
+      </> : <CalendarView items={items} onOpenItem={(id) => { setSelectedId(id); setCategory("All things"); setSearch(""); setView("library"); }} />}
+      </div>
 
       <footer className="page-footer"><Link className="footer-brand" href="/">kept<span>.</span></Link></footer>
 

@@ -5,7 +5,7 @@ const PHOTO_BUCKET = "product-photos";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ItemRow = {
-  id: string; name: string; category: string | null; note: string | null; product_url: string | null;
+  id: string; name: string; category: string | null; note: string | null; product_url: string | null; store_name: string | null;
   product_photo_path: string | null; listed_price_override: TrackedItem["listedPriceOverride"] | null;
   current_product: TrackedItem["currentProduct"] | null; created_at: string;
 };
@@ -33,7 +33,7 @@ export async function loadTrackerItems(client: SupabaseClient, userId: string): 
     }
     return {
       id: row.id, name: row.name, category: row.category ?? undefined, note: row.note ?? undefined,
-      productUrl: row.product_url ?? undefined, productPhoto, productPhotoPath: row.product_photo_path ?? undefined,
+      productUrl: row.product_url ?? undefined, storeName: row.store_name ?? undefined, productPhoto, productPhotoPath: row.product_photo_path ?? undefined,
       listedPriceOverride: row.listed_price_override ?? undefined, currentProduct: row.current_product ?? undefined,
       createdAt: row.created_at,
       events: events.filter((entry) => entry.item_id === row.id).map((entry) => ({
@@ -74,7 +74,7 @@ export async function syncTrackerItems(client: SupabaseClient, userId: string, p
     const photoPath = await uploadPhoto(client, userId, item);
     const { error: itemError } = await client.from("items").upsert({
       id: item.id, user_id: userId, name: item.name, category: item.category ?? null, note: item.note ?? null,
-      product_url: item.productUrl ?? null, product_photo_path: photoPath ?? null,
+      product_url: item.productUrl ?? null, store_name: item.storeName ?? null, product_photo_path: photoPath ?? null,
       listed_price_override: item.listedPriceOverride ?? null, current_product: item.currentProduct ?? null,
       created_at: item.createdAt,
     });
@@ -131,7 +131,7 @@ export async function importTrackerItems(client: SupabaseClient, userId: string,
     const safePhotoPath = item.productPhoto?.startsWith("data:image/") ? photoPath : item.productPhotoPath?.startsWith(`${userId}/`) ? item.productPhotoPath : undefined;
     const { error } = await client.from("items").upsert({
       id: item.id, user_id: userId, name: item.name, category: item.category ?? null, note: item.note ?? null,
-      product_url: item.productUrl ?? null, product_photo_path: safePhotoPath ?? null,
+      product_url: item.productUrl ?? null, store_name: item.storeName ?? null, product_photo_path: safePhotoPath ?? null,
       listed_price_override: item.listedPriceOverride ?? null, current_product: item.currentProduct ?? null,
       created_at: item.createdAt,
     });

@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { retailerForHost } from "@/lib/retailers";
 
 export const runtime = "nodejs";
 
@@ -231,7 +232,8 @@ export async function POST(request: Request) {
   try {
     const initialUrl = await validatePublicHttpsURL(rawUrl);
     const result = await fetchProductPage(initialUrl);
-    return Response.json({ ...result.data, sourceUrl: result.sourceUrl, fetchedAt: new Date().toISOString() }, {
+    const retailer = retailerForHost(initialUrl.hostname) ?? retailerForHost(new URL(result.sourceUrl).hostname);
+    return Response.json({ ...result.data, storeName: retailer?.name, sourceUrl: result.sourceUrl, fetchedAt: new Date().toISOString() }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

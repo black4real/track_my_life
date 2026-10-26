@@ -6,9 +6,11 @@ Kept is a personal tracker for the things you own, buy again, use, and maintain.
 
 - Add an item with only its name; dates, category, price, notes, and product link are optional.
 - Keep purchases, service, and use notes in a dated timeline.
+- Switch to a month calendar to browse dated events by day, with item photos and a list of that day’s activity.
 - Record purchase quantity and actual total paid, including discounts and bundles.
 - Save product variants with separate listed prices.
 - Add your own product photo or let Kept read public product page details when a shop allows it.
+- Paste links from H&M, Myntra, Flipkart, Meesho, Amazon India, AJIO, Nykaa, quick-commerce shops, and Tata shopping brands. Kept suggests the shop and tries common public product metadata; other HTTPS product pages use the same general reader.
 - Create an account with email/password or sign in with Google. Records sync through Supabase and can also be edited in its Table Editor.
 - Export and restore a JSON backup. Kept asks before copying old browser records into a signed-in account.
 - Switch between light and dark themes.
@@ -28,7 +30,7 @@ Without Supabase environment values, Kept remains in local-browser mode. Follow 
 ## Supabase setup
 
 1. Create a Supabase project. The free plan is enough to get started; check its current limits and inactivity behavior on [Supabase pricing](https://supabase.com/pricing).
-2. In the Supabase SQL Editor, run [`supabase/migrations/20261026000100_tracker.sql`](./supabase/migrations/20261026000100_tracker.sql). This creates the item, variant, and event tables, row-level security, and a private product-photo bucket.
+2. In the Supabase SQL Editor, run [`supabase/migrations/20261026000100_tracker.sql`](./supabase/migrations/20261026000100_tracker.sql), then run [`supabase/migrations/20261026000200_store_name.sql`](./supabase/migrations/20261026000200_store_name.sql). These create the item, variant, and event tables, row-level security, a private product-photo bucket, and the saved shop-name field.
 3. In **Authentication → Sign In / Providers**, keep email/password enabled and enable Google after adding your Google OAuth client ID and secret. Add the Supabase callback URL shown on that provider page to the Google OAuth client.
 4. In **Authentication → Settings**, enable public sign-ups. Add `http://localhost:3000/**` and your deployed Vercel domain with `/**` to the allowed redirect URLs. Set the site URL to your deployed Vercel address. Email confirmation may be enabled; new users will need to confirm their email before signing in.
 5. New users can create their own accounts from Kept’s sign-in screen. With email confirmation enabled, they must confirm their address before signing in. Google sign-in is available once its provider is configured.
@@ -64,7 +66,7 @@ Run `npm run build` before `npm run start`.
 
 When Supabase is configured, each authenticated account can access only its own item records and product photos. The browser never receives an admin or service-role secret. Your theme stays in this browser. If Supabase is not configured, records continue to use this browser's local storage as before.
 
-Product previews are requested by the app's server from public HTTPS product pages. Shops may block automatic reads or omit variant information; manual purchase entry, product photos, and listed prices still work.
+Product previews are requested by the app's server from public HTTPS product pages. Kept reads common Open Graph, Twitter Card, and Schema.org product metadata; it does not log in to shops or bypass their protections. Shops may block automatic reads or omit variant information; you can still type a shop name and product title, edit the photo URL and listed price, then enter the actual amount paid separately.
 
 ## Design notes
 

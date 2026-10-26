@@ -19,6 +19,7 @@ export type TrackedItem = {
   category?: string;
   note?: string;
   productUrl?: string;
+  storeName?: string;
   productPhoto?: string;
   productPhotoPath?: string;
   listedPriceOverride?: { amount: number; currency: string };
@@ -49,7 +50,7 @@ export type BackupFile = {
 };
 
 export const STORAGE_KEY = "kept-tracker-v1";
-export const CATEGORIES = ["Clothes", "Accessories", "Tech", "Health", "Fitness", "Skincare", "Home", "Vehicle", "Other"];
+export const CATEGORIES = ["Clothes", "Accessories", "Tech", "Grooming", "Fitness", "Health & supplements", "Skincare", "Home", "Vehicle", "Other"];
 
 function isSafeHttpsUrl(value: string) {
   try {
@@ -65,6 +66,7 @@ export function validItems(value: unknown): value is TrackedItem[] {
     typeof item.id === "string" && typeof item.name === "string" &&
     typeof item.createdAt === "string" && Array.isArray(item.events) &&
     (item.productUrl === undefined || (typeof item.productUrl === "string" && item.productUrl.length <= 2048 && isSafeHttpsUrl(item.productUrl))) &&
+    (item.storeName === undefined || (typeof item.storeName === "string" && item.storeName.length <= 100)) &&
     (item.productPhoto === undefined || (typeof item.productPhoto === "string" && item.productPhoto.length <= 1_500_000 && /^data:image\/(?:jpeg|webp|png);base64,/i.test(item.productPhoto))) &&
     (item.productPhotoPath === undefined || (typeof item.productPhotoPath === "string" && item.productPhotoPath.length <= 500 && !item.productPhotoPath.startsWith("/") && !item.productPhotoPath.includes(".."))) &&
     (item.listedPriceOverride === undefined || (
