@@ -6,7 +6,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ageLabel, BackupFile, CATEGORIES, EventKind, formatDate, formatMoney,
+  ageLabel, BackupFile, CATEGORIES, detailFields, EventKind, formatDate, formatMoney, ITEM_TYPES,
   lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
@@ -48,6 +48,10 @@ function labelForKind(kind: EventKind) {
   return kind === "purchase" ? "Bought" : kind === "service" ? "Serviced" : "Use note";
 }
 
+function attributeLabel(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function formatAgeFromEvent(item: TrackedItem) {
   const dates = purchases(item).map((event) => event.date).filter((date): date is string => Boolean(date)).sort();
   return ageLabel(dates[0]);
@@ -70,11 +74,17 @@ export default function Home() {
   const [formError, setFormError] = useState("");
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [eventKind, setEventKind] = useState<EventKind>("purchase");
+  const [eventCustomFields, setEventCustomFields] = useState<Array<{ id: string; label: string; value: string }>>([]);
   const [notice, setNotice] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [addName, setAddName] = useState("");
+  const [addCategory, setAddCategory] = useState("");
+  const [addItemType, setAddItemType] = useState("");
+  const [addSpecifications, setAddSpecifications] = useState<Record<string, string>>({});
+  const [addCustomFields, setAddCustomFields] = useState<Array<{ id: string; label: string; value: string }>>([]);
+  const [addPurchaseAttributes, setAddPurchaseAttributes] = useState<Record<string, string>>({});
   const [addNameTouched, setAddNameTouched] = useState(false);
   const [addProductUrl, setAddProductUrl] = useState("");
   const [addStoreName, setAddStoreName] = useState("");
@@ -208,9 +218,11 @@ export default function Home() {
   const categories = useMemo(() => [...new Set(items.map((item) => item.category).filter((value): value is string => Boolean(value)))], [items]);
   const visibleItems = useMemo(() => items
     .filter((item) => category === "All things" || item.category === category)
-    .filter((item) => `${item.name} ${item.category ?? ""} ${item.note ?? ""}`.toLowerCase().includes(search.toLowerCase()))
+    .filter((item) => `${item.name} ${item.category ?? ""} ${item.itemType ?? ""} ${item.note ?? ""}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name)), [items, category, search]);
   const selectedItem = visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null;
+  const addAttributeFields = detailFields(addCategory, addItemType);
+  const selectedPurchaseFields = selectedItem ? detailFields(selectedItem.category, selectedItem.itemType).purchase : [];
 
   useEffect(() => {
     if (!ready || !selectedItem?.productUrl) return;
@@ -271,6 +283,7 @@ export default function Home() {
   }
 
   function openAddItem() {
+    setAddCategory(""); setAddItemType(""); setAddSpecifications({}); setAddCustomFields([]); setAddPurchaseAttributes({});
     setAddName(""); setAddNameTouched(false); setAddProductUrl(""); setAddStoreName(""); setAddStoreEdited(false);
     setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddListedCurrency("INR"); setAddPriceEdited(false);
     setFormError(""); setModal("item");
@@ -326,6 +339,7 @@ export default function Home() {
       return;
     }
     const categoryValue = String(data.get("category") ?? "").trim();
+    const itemTypeValue = addItemType.trim();
     const note = String(data.get("note") ?? "").trim();
     const productUrl = String(data.get("productUrl") ?? "").trim();
     if (productUrl) {
@@ -352,13 +366,22 @@ export default function Home() {
       catch { setFormError("Use an image link starting with https://."); return; }
     }
     const now = new Date().toISOString();
+    const specifications = Object.fromEntries([
+      ...Object.entries(addSpecifications),
+      ...addCustomFields.map((field) => [field.label.trim(), field.value.trim()] as const),
+    ].filter(([key, value]) => key.trim() && value.trim()));
+    const purchaseAttributes = Object.fromEntries([
+      ...Object.entries(addPurchaseAttributes),
+    ].filter(([key, value]) => key.trim() && value.trim()));
     const item: TrackedItem = {
-      id: makeId(), name, category: categoryValue || undefined, note: note || undefined, productUrl: productUrl || undefined,
+      id: makeId(), name, category: categoryValue || undefined, itemType: itemTypeValue || undefined,
+      specifications: Object.keys(specifications).length ? specifications : undefined,
+      note: note || undefined, productUrl: productUrl || undefined,
       storeName: addStoreName.trim() || detectRetailer(productUrl)?.name || undefined,
       currentProduct: addPreview ? { title: addName.trim() || addPreview.title || name, imageUrl: addImageUrl || undefined, amount: addPreview.amount, currency: addPreview.currency, fetchedAt: addPreview.fetchedAt } : (addImageUrl || listedAmount !== undefined ? { title: addName.trim() || name, imageUrl: addImageUrl || undefined } : undefined),
       listedPriceOverride: addPriceEdited && listedAmount !== undefined ? { amount: listedAmount, currency: addListedCurrency } : undefined,
       createdAt: now,
-      events: date || amount !== undefined ? [{ id: makeId(), kind: "purchase", date: date || undefined, amount, currency: amount !== undefined ? currency : undefined, createdAt: now }] : [],
+      events: date || amount !== undefined || Object.values(purchaseAttributes).some(Boolean) ? [{ id: makeId(), kind: "purchase", date: date || undefined, amount, currency: amount !== undefined ? currency : undefined, attributes: Object.keys(purchaseAttributes).length ? purchaseAttributes : undefined, createdAt: now }] : [],
     };
     setItems((current) => [...current, item]);
     setSelectedId(item.id);
@@ -366,7 +389,7 @@ export default function Home() {
     setSearch("");
     setModal(null);
     setFormError("");
-    setAddName(""); setAddNameTouched(false); setAddProductUrl(""); setAddStoreName(""); setAddStoreEdited(false); setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddPriceEdited(false);
+    setAddName(""); setAddNameTouched(false); setAddCategory(""); setAddItemType(""); setAddSpecifications({}); setAddCustomFields([]); setAddPurchaseAttributes({}); setAddProductUrl(""); setAddStoreName(""); setAddStoreEdited(false); setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddPriceEdited(false);
     event.currentTarget.reset();
     announce(`${name} added to your things.`);
   }
@@ -381,14 +404,19 @@ export default function Home() {
     const note = String(data.get("note") ?? "").trim();
     const feeling = String(data.get("feeling") ?? "");
     const quantityValue = String(data.get("quantity") ?? "").trim();
-    const quantity = eventKind === "purchase" ? Math.max(1, Math.floor(Number(quantityValue) || 1)) : undefined;
+    const quantity = eventKind === "purchase" ? selectedItem.category === "Clothes" ? 1 : Math.max(1, Math.floor(Number(quantityValue) || 1)) : undefined;
     const variant = eventKind === "purchase" ? String(data.get("variant") ?? "").trim() : "";
+    const attributes = eventKind === "purchase" ? Object.fromEntries([
+      ...selectedPurchaseFields.map((field) => [field.key, String(data.get(`purchase-attribute-${field.key}`) ?? "").trim()] as const),
+      ...eventCustomFields.map((field) => [field.label.trim(), field.value.trim()] as const),
+    ].filter(([key, value]) => key.trim() && value.trim())) : {};
     const now = new Date().toISOString();
     const log = {
       id: makeId(), kind: eventKind, date: date || undefined, amount,
       currency: amount !== undefined ? String(data.get("currency") || "INR") : undefined,
       quantity: quantity !== 1 ? quantity : undefined,
       variant: variant || undefined,
+      attributes: Object.keys(attributes).length ? attributes : undefined,
       note: note || undefined,
       feeling: eventKind === "use" && feeling ? feeling as "loved" | "okay" | "regret" : undefined,
       createdAt: now,
@@ -443,6 +471,7 @@ export default function Home() {
   function openEvent(kind: EventKind) {
     setFormError("");
     setEventKind(kind);
+    setEventCustomFields([]);
     setModal("event");
   }
 
@@ -644,7 +673,17 @@ export default function Home() {
     {formError ? <p className="form-error" id="item-form-error" role="alert">{formError}</p> : null}
     <form onSubmit={saveItem} className="entry-form" noValidate>
       <label className="field"><span>Thing name <b>REQUIRED</b></span><input ref={nameInput} name="name" value={addName} maxLength={80} autoFocus placeholder="e.g. Everyday watch" aria-required="true" aria-invalid={formError === "Please add a name before saving."} aria-describedby={formError === "Please add a name before saving." ? "item-form-error" : undefined} onChange={(event) => { setAddName(event.target.value); setAddNameTouched(true); setFormError(""); }} /></label>
-      <label className="field"><span>Category <b>OPTIONAL</b></span><select name="category" defaultValue=""><option value="">Choose if useful</option>{CATEGORIES.map((option) => <option key={option}>{option}</option>)}</select></label>
+      <div className="field-pair">
+        <label className="field"><span>Category <b>OPTIONAL</b></span><select name="category" value={addCategory} onChange={(event) => setAddCategory(event.target.value)}><option value="">Choose if useful</option>{CATEGORIES.map((option) => <option key={option}>{option}</option>)}</select></label>
+        <label className="field"><span>Item type <b>OPTIONAL</b></span><input value={addItemType} onChange={(event) => setAddItemType(event.target.value)} list="item-type-options" maxLength={100} placeholder="e.g. hoodie" /><datalist id="item-type-options">{Array.from(new Set(ITEM_TYPES[addCategory] ?? Object.values(ITEM_TYPES).flat())).map((type) => <option key={type} value={type} />)}</datalist></label>
+      </div>
+      {addAttributeFields.item.length ? <div className="attribute-fields" aria-label="Suggested item details">
+        {addAttributeFields.item.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input maxLength={160} value={addSpecifications[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setAddSpecifications((current) => ({ ...current, [field.key]: event.target.value }))} /></label>)}
+      </div> : null}
+      <div className="custom-fields-block">
+        {addCustomFields.map((field) => <div className="custom-attribute-row" key={field.id}><label className="field"><span>Detail name</span><input maxLength={60} value={field.label} placeholder="e.g. Fabric" onChange={(event) => setAddCustomFields((current) => current.map((entry) => entry.id === field.id ? { ...entry, label: event.target.value } : entry))} /></label><label className="field"><span>Value</span><input maxLength={160} value={field.value} placeholder="Add a detail" onChange={(event) => setAddCustomFields((current) => current.map((entry) => entry.id === field.id ? { ...entry, value: event.target.value } : entry))} /></label><button className="text-button remove-custom-field" type="button" onClick={() => setAddCustomFields((current) => current.filter((entry) => entry.id !== field.id))} aria-label="Remove custom detail">Remove</button></div>)}
+        <button className="text-button add-custom-field" type="button" disabled={addCustomFields.length >= 20} onClick={() => setAddCustomFields((current) => [...current, { id: makeId(), label: "", value: "" }])}>＋ Add custom detail</button>
+      </div>
       <div className="shop-link-block">
         <label className="field"><span>Product link <b>OPTIONAL</b></span><input name="productUrl" type="url" value={addProductUrl} maxLength={2048} placeholder="Paste a product page link" aria-invalid={formError.startsWith("Add a full product link")} onChange={(event) => { changeAddProductUrl(event.target.value); setFormError(""); }} /><small className="field-hint">Paste a link from a shop. We’ll try to find its product details.</small></label>
         <label className="field"><span>Shop <b>SEARCH OR TYPE</b></span><input value={addStoreName} onChange={(event) => { setAddStoreName(event.target.value); setAddStoreEdited(true); }} list="retailer-options" placeholder="Choose or type a shop name" /><datalist id="retailer-options">{RETAILERS.map((retailer) => <option key={retailer.name} value={retailer.name}>{retailer.group}</option>)}</datalist></label>
@@ -661,9 +700,12 @@ export default function Home() {
           {addPreview?.amount !== undefined ? <small className="field-hint">Listed price found on the shop page. Enter what you actually paid below.</small> : null}
         </section> : null}
       </div>
-      <div className="form-subheading"><span>FIRST PURCHASE</span><span>ALL OPTIONAL</span></div>
-      <div className="field-pair"><label className="field"><span>Date</span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label><label className="field"><span>What you paid</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label></div>
-      <label className="field"><span>A note <b>OPTIONAL</b></span><textarea name="note" rows={2} maxLength={240} placeholder="Color, where you got it, anything to remember…" /></label>
+      <div className="form-subheading"><span>{addCategory === "Clothes" ? "FIRST PIECE" : "FIRST PURCHASE"}</span><span>ALL OPTIONAL</span></div>
+      {addAttributeFields.purchase.length ? <div className="attribute-fields purchase-attribute-fields">
+        {addAttributeFields.purchase.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input maxLength={120} value={addPurchaseAttributes[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setAddPurchaseAttributes((current) => ({ ...current, [field.key]: event.target.value }))} /></label>)}
+      </div> : null}
+      <div className="field-pair"><label className="field"><span>Date</span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label><label className="field"><span>{addCategory === "Clothes" ? "Paid for this piece" : "What you paid"}</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div>{addCategory === "Clothes" ? <small className="field-hint">Each garment gets its own purchase entry.</small> : null}</label></div>
+      <label className="field"><span>A note <b>OPTIONAL</b></span><textarea name="note" rows={2} maxLength={240} placeholder="Anything else to remember…" /></label>
       <div className="dialog-footer"><span>{user ? "Saved to your account." : "Saved in this browser."}</span><button className="button button-primary" type="submit">Save this thing <Icon name="arrow" size={16} /></button></div>
     </form>
   </section> : null;
@@ -673,8 +715,13 @@ export default function Home() {
     <p className="dialog-intro">Write down what you remember. You can leave any field blank.</p>
     <form onSubmit={saveEvent} className="entry-form" noValidate>
       <label className="field"><span>Date <b>OPTIONAL</b></span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label>
-      {eventKind !== "use" ? <label className="field"><span>{eventKind === "purchase" ? "Total you paid" : "Service cost"} <b>OPTIONAL</b></span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div>{eventKind === "purchase" ? <small className="field-hint">Enter the total for these units after discounts, card offers, or bundles.</small> : null}</label> : null}
-      {eventKind === "purchase" ? <div className="field-pair"><label className="field"><span>Quantity</span><input name="quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" defaultValue="1" /></label><label className="field"><span>Variant or size <b>OPTIONAL</b></span>{selectedItem.variants?.length ? <select name="variant" defaultValue=""><option value="">Choose if useful</option>{selectedItem.variants.map((variant) => <option key={variant.id}>{variant.name}</option>)}</select> : <input name="variant" maxLength={120} placeholder="e.g. 100g, medium, black" />}</label></div> : null}
+      {eventKind !== "use" ? <label className="field"><span>{eventKind === "purchase" ? selectedItem.category === "Clothes" ? "Paid for this piece" : "Total you paid" : "Service cost"} <b>OPTIONAL</b></span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div>{eventKind === "purchase" ? <small className="field-hint">{selectedItem.category === "Clothes" ? "Log one garment per entry, including its own price and size." : "Enter the total for these units after discounts, card offers, or bundles."}</small> : null}</label> : null}
+      {eventKind === "purchase" && selectedPurchaseFields.length ? <div className="attribute-fields purchase-attribute-fields">{selectedPurchaseFields.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input name={`purchase-attribute-${field.key}`} maxLength={120} placeholder={field.placeholder} /></label>)}</div> : null}
+      {eventKind === "purchase" && selectedItem.category !== "Clothes" ? <div className="field-pair"><label className="field"><span>Quantity</span><input name="quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" defaultValue="1" /></label><label className="field"><span>Variant <b>OPTIONAL</b></span>{selectedItem.variants?.length ? <select name="variant" defaultValue=""><option value="">Choose if useful</option>{selectedItem.variants.map((variant) => <option key={variant.id}>{variant.name}</option>)}</select> : <input name="variant" maxLength={120} placeholder="e.g. 100g, medium, black" />}</label></div> : null}
+      {eventKind === "purchase" ? <div className="custom-fields-block">
+        {eventCustomFields.map((field) => <div className="custom-attribute-row" key={field.id}><label className="field"><span>Detail name</span><input maxLength={60} value={field.label} placeholder="e.g. Fabric" onChange={(event) => setEventCustomFields((current) => current.map((entry) => entry.id === field.id ? { ...entry, label: event.target.value } : entry))} /></label><label className="field"><span>Value</span><input maxLength={160} value={field.value} placeholder="Add a detail" onChange={(event) => setEventCustomFields((current) => current.map((entry) => entry.id === field.id ? { ...entry, value: event.target.value } : entry))} /></label><button className="text-button remove-custom-field" type="button" onClick={() => setEventCustomFields((current) => current.filter((entry) => entry.id !== field.id))} aria-label="Remove custom purchase detail">Remove</button></div>)}
+        <button className="text-button add-custom-field" type="button" disabled={eventCustomFields.length >= 20} onClick={() => setEventCustomFields((current) => [...current, { id: makeId(), label: "", value: "" }])}>＋ Add another detail</button>
+      </div> : null}
       {eventKind === "use" ? <label className="field"><span>How did it feel? <b>OPTIONAL</b></span><select name="feeling" defaultValue=""><option value="">Skip for now</option><option value="loved">I really liked it</option><option value="okay">It was okay</option><option value="regret">I didn’t like it much</option></select></label> : null}
       <label className="field"><span>A note <b>OPTIONAL</b></span><textarea name="note" rows={3} maxLength={400} placeholder={eventKind === "service" ? "What was done? Anything to remember for next time…" : eventKind === "use" ? "How often, what worked, what didn’t…" : "Coupon, card offer, bundle, or where you bought it…"} /></label>
       <div className="dialog-footer"><span>You can always add more later.</span><button className="button button-primary" type="submit">Add to timeline <Icon name="arrow" size={16} /></button></div>
@@ -781,7 +828,7 @@ export default function Home() {
               return <button className={`item-row ${isActive ? "selected" : ""}`} key={item.id} onClick={() => setSelectedId(item.id)} aria-pressed={isActive}>
                 <span className={`item-number ${index % 3 === 1 ? "number-soft" : ""}`}>{String(index + 1).padStart(2, "0")}</span>
                 {item.productPhoto || item.currentProduct?.imageUrl ? <img className="item-thumbnail" src={item.productPhoto || item.currentProduct?.imageUrl} alt="" referrerPolicy="no-referrer" /> : <span className={`item-seal seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true"><span>{item.name.trim().charAt(0).toUpperCase()}</span></span>}
-                <span className="item-main"><strong>{item.name}</strong><small>{item.category || "Unsorted"}{totalUnits > 1 ? <span> · {totalUnits} units</span> : buys.length > 1 ? <span> · {buys.length} buys</span> : null}</small></span>
+                <span className="item-main"><strong>{item.name}</strong><small>{[item.category || "Unsorted", item.itemType].filter(Boolean).join(" · ")}{totalUnits > 1 ? <span> · {totalUnits} units</span> : buys.length > 1 ? <span> · {buys.length} buys</span> : null}</small></span>
                 <span className="item-status">{lastService ? <><small>SERVICE</small><strong>{lastService.date ? ageLabel(lastService.date) + " ago" : "logged"}</strong></> : lastPurchase?.date ? <><small>OWNED</small><strong>{formatAgeFromEvent(item)}</strong></> : <><small>ADDED</small><strong>—</strong></>}</span>
                 <span className="row-arrow" aria-hidden="true"><Icon name="arrow" size={17} /></span>
               </button>;
@@ -795,8 +842,9 @@ export default function Home() {
         {selectedItem ? <aside className="detail-column" aria-label={`${selectedItem.name} details`}>
           <div className="detail-record" key={selectedItem.id}>
             <div className="detail-topline"><span className="eyebrow">OBJECT RECORD <span>/ {String(items.findIndex((item) => item.id === selectedItem.id) + 1).padStart(2, "0")}</span></span><button className="icon-button remove-item" onClick={() => removeItem(selectedItem)} aria-label={`Remove ${selectedItem.name}`} title="Remove this thing"><Icon name="trash" size={17} /></button></div>
-            <div className="detail-heading"><span className={`detail-seal seal-${(selectedItem.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</span><div><span className="detail-category">{selectedItem.category || "UNCATEGORIZED"}</span><h3>{selectedItem.name}</h3></div></div>
+            <div className="detail-heading"><span className={`detail-seal seal-${(selectedItem.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</span><div><span className="detail-category">{[selectedItem.category || "UNCATEGORIZED", selectedItem.itemType].filter(Boolean).join(" · ")}</span><h3>{selectedItem.name}</h3></div></div>
             {selectedItem.note ? <p className="item-note">{selectedItem.note}</p> : null}
+            {selectedItem.specifications && Object.entries(selectedItem.specifications).some(([, value]) => value) ? <dl className="item-specifications">{Object.entries(selectedItem.specifications).filter(([, value]) => value).map(([key, value]) => <div key={key}><dt>{attributeLabel(key)}</dt><dd>{value}</dd></div>)}</dl> : null}
             <section className={`product-card ${selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl ? "has-product-image" : "no-product-image"}`} aria-label="Product details">
               <div className="product-card-heading"><span className="eyebrow">{selectedItem.storeName || "PRODUCT DETAILS"}</span>{selectedItem.productUrl ? <button className="product-refresh" onClick={() => setProductRefreshToken((value) => value + 1)} aria-label="Refresh current product details" title="Refresh product details"><Icon name="refresh" size={17} /></button> : null}</div>
               {(selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl) ? <img className="product-image" src={selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl} alt={selectedItem.currentProduct?.title || selectedItem.name} referrerPolicy="no-referrer" /> : <div className="product-image-placeholder" aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</div>}
@@ -853,6 +901,7 @@ export default function Home() {
             {sortedEvents(selectedItem).length ? sortedEvents(selectedItem).map((event, index) => <article className={`timeline-entry ${event.kind}`} key={event.id}>
                 <span className="timeline-node" aria-hidden="true"><span /></span><div className="timeline-copy"><div className="event-label-row"><span className="event-label">{labelForKind(event.kind)}</span><span className="event-date">{formatDate(event.date)}</span></div>
                   {event.kind === "purchase" && (event.variant || (event.quantity ?? 1) > 1) ? <span className="event-variant">{[event.quantity && event.quantity > 1 ? `${event.quantity} units` : null, event.variant].filter(Boolean).join(" · ")}</span> : null}
+                  {event.attributes && Object.entries(event.attributes).some(([, value]) => value) ? <span className="event-attributes">{Object.entries(event.attributes).filter(([, value]) => value).map(([key, value]) => `${attributeLabel(key)}: ${value}`).join(" · ")}</span> : null}
                   {event.amount !== undefined ? <strong className="event-amount">{formatMoney(event.amount, event.currency)}{event.kind === "purchase" && (event.quantity ?? 1) > 1 ? <small> total · {formatMoney(event.amount / (event.quantity ?? 1), event.currency)} each</small> : null}</strong> : null}
                   {event.note ? <p>{event.note}</p> : null}
                   {event.feeling ? <span className={`feeling-tag ${event.feeling}`}>{event.feeling === "loved" ? "♥ Loved it" : event.feeling === "regret" ? "↗ Would skip" : "○ It was okay"}</span> : null}

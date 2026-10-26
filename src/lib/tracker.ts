@@ -10,6 +10,7 @@ export type ItemEvent = {
   variant?: string;
   note?: string;
   feeling?: "loved" | "okay" | "regret";
+  attributes?: Record<string, string>;
   createdAt: string;
 };
 
@@ -17,6 +18,8 @@ export type TrackedItem = {
   id: string;
   name: string;
   category?: string;
+  itemType?: string;
+  specifications?: Record<string, string>;
   note?: string;
   productUrl?: string;
   storeName?: string;
@@ -52,6 +55,37 @@ export type BackupFile = {
 export const STORAGE_KEY = "kept-tracker-v1";
 export const CATEGORIES = ["Clothes", "Accessories", "Tech", "Grooming", "Fitness", "Health & supplements", "Skincare", "Home", "Vehicle", "Other"];
 
+export type DetailField = { key: string; label: string; placeholder: string };
+
+export const ITEM_TYPES: Record<string, string[]> = {
+  Clothes: ["Hoodie", "Sweatshirt", "T-shirt", "Shirt", "Jeans", "Trousers", "Bottom wear", "Shorts", "Jacket"],
+  Accessories: ["Running shoes", "Hiking shoes", "Training shoes", "Watch", "Glasses", "Sunglasses", "Perfume"],
+  Tech: ["Phone", "Laptop", "Earphones", "IEMs", "Charger"],
+  Grooming: ["Haircut", "Shampoo", "Hair styling"],
+  Fitness: ["Protein powder", "Training gear"],
+  "Health & supplements": ["Vitamin D3", "Magnesium", "Protein powder", "Supplement", "Powder"],
+  Skincare: ["Cream", "Gel", "Lotion", "Serum", "Sunscreen", "Cleanser"],
+};
+
+export function detailFields(category?: string, itemType?: string): { item: DetailField[]; purchase: DetailField[] } {
+  const type = (itemType ?? "").toLowerCase();
+  const clothes = category === "Clothes" || /hoodie|sweatshirt|t-shirt|shirt|jeans|trouser|bottom wear|shorts|jacket|apparel/.test(type);
+  const shoes = /shoe|sneaker|boot|footwear/.test(type);
+  const watch = /watch/.test(type);
+  const perfume = /perfume|fragrance|cologne/.test(type);
+  const consumable = ["Skincare", "Health & supplements"].includes(category ?? "") || /cream|gel|lotion|serum|sunscreen|cleanser|vitamin|supplement|protein powder/.test(type);
+  if (shoes) return { item: [{ key: "material", label: "Material", placeholder: "Optional" }], purchase: [{ key: "size", label: "Size", placeholder: "e.g. 8, 42" }, { key: "color", label: "Color", placeholder: "e.g. black" }] };
+  if (clothes) return { item: [{ key: "fit", label: "Fit", placeholder: "e.g. loose fit" }, { key: "material", label: "Material", placeholder: "Optional" }], purchase: [{ key: "size", label: "Size", placeholder: "e.g. XL or 32/34" }, { key: "color", label: "Color", placeholder: "e.g. charcoal" }] };
+  if (watch) return { item: [{ key: "movement", label: "Movement", placeholder: "Automatic, quartz…" }, { key: "dial_color", label: "Dial color", placeholder: "Optional" }, { key: "band_color", label: "Band color", placeholder: "Optional" }], purchase: [] };
+  if (perfume) return { item: [{ key: "concentration", label: "Concentration", placeholder: "EDP, EDT…" }, { key: "volume", label: "Volume", placeholder: "e.g. 50" }, { key: "unit", label: "Unit", placeholder: "ml" }], purchase: [] };
+  if (consumable) return { item: [{ key: "form", label: "Form", placeholder: "Cream, gel, powder…" }, { key: "amount", label: "Amount", placeholder: "e.g. 100" }, { key: "unit", label: "Unit", placeholder: "g, mg, ml…" }], purchase: [] };
+  return { item: [], purchase: [] };
+}
+
+function validStringMap(value: unknown) {
+  return value === undefined || (!!value && typeof value === "object" && !Array.isArray(value) && Object.entries(value).length <= 30 && Object.entries(value).every(([key, entry]) => key.length <= 60 && typeof entry === "string" && entry.length <= 160));
+}
+
 function isSafeHttpsUrl(value: string) {
   try {
     const url = new URL(value);
@@ -65,6 +99,8 @@ export function validItems(value: unknown): value is TrackedItem[] {
     item && typeof item === "object" &&
     typeof item.id === "string" && typeof item.name === "string" &&
     typeof item.createdAt === "string" && Array.isArray(item.events) &&
+    (item.itemType === undefined || (typeof item.itemType === "string" && item.itemType.length <= 100)) &&
+    validStringMap(item.specifications) &&
     (item.productUrl === undefined || (typeof item.productUrl === "string" && item.productUrl.length <= 2048 && isSafeHttpsUrl(item.productUrl))) &&
     (item.storeName === undefined || (typeof item.storeName === "string" && item.storeName.length <= 100)) &&
     (item.productPhoto === undefined || (typeof item.productPhoto === "string" && item.productPhoto.length <= 1_500_000 && /^data:image\/(?:jpeg|webp|png);base64,/i.test(item.productPhoto))) &&
@@ -99,6 +135,7 @@ export function validItems(value: unknown): value is TrackedItem[] {
         (candidate.amount === undefined || (typeof candidate.amount === "number" && Number.isFinite(candidate.amount))) &&
         (candidate.quantity === undefined || (Number.isInteger(candidate.quantity) && Number(candidate.quantity) > 0 && Number(candidate.quantity) <= 10000)) &&
         (candidate.variant === undefined || (typeof candidate.variant === "string" && candidate.variant.length <= 120)) &&
+        validStringMap(candidate.attributes) &&
         (candidate.currency === undefined || (typeof candidate.currency === "string" && /^[A-Z]{3}$/.test(candidate.currency)));
     }),
   );

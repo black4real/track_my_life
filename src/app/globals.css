@@ -534,6 +534,17 @@ html[data-theme="dark"] .toast { border-color: var(--toast-border); background: 
 .preview-product-button:disabled { cursor: wait; opacity: .65; }
 .add-product-preview { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
 .add-preview-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 10px; }
+.attribute-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.purchase-attribute-fields { padding: 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+.custom-fields-block { display: grid; gap: 9px; }
+.custom-attribute-row { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+.remove-custom-field { min-height: 36px; white-space: nowrap; }
+.add-custom-field { justify-self: start; min-height: 32px; }
+.item-specifications { display: flex; flex-wrap: wrap; gap: 8px; margin: -3px 0 20px; }
+.item-specifications > div { min-width: 80px; padding: 7px 10px; border: 1px solid var(--rule); border-radius: 3px; background: var(--paper); }
+.item-specifications dt { color: var(--muted); font-family: var(--font-mono); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+.item-specifications dd { margin: 2px 0 0; color: var(--ink-soft); font-size: 11px; }
+.event-attributes { display: block; color: var(--muted); font-size: 10px; }
 .add-preview-heading .eyebrow { margin: 0; color: var(--leaf-strong); }
 .add-preview-content { display: grid; grid-template-columns: minmax(92px, 132px) minmax(0, 1fr); align-items: center; gap: 14px; }
 .add-preview-content > img, .add-preview-placeholder { width: 100%; aspect-ratio: 1; object-fit: contain; border: 1px solid var(--rule); border-radius: 3px; background: var(--white); }
@@ -605,6 +616,8 @@ html[data-theme="dark"] .calendar-day:hover, html[data-theme="dark"] .calendar-e
   .calendar-day-photos img, .calendar-photo-fallback { width: 25px; height: 30px; }
   .calendar-event-count { max-width: 100%; overflow: hidden; font-size: 7px; text-overflow: ellipsis; }
   .calendar-grid-wrap { padding: 7px; }
+  .custom-attribute-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .remove-custom-field { grid-column: 2; justify-self: end; min-height: 24px; }
 }
 @media (max-width: 430px) {
   .calendar-view { padding-top: 31px; }
@@ -623,4 +636,6 @@ html[data-theme="dark"] .calendar-day:hover, html[data-theme="dark"] .calendar-e
   .add-preview-content { grid-template-columns: 78px minmax(0, 1fr); gap: 9px; }
   .add-product-preview { padding: 10px; }
   .add-preview-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .attribute-fields { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .custom-attribute-row { gap: 7px; }
 }

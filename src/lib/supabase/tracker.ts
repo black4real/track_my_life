@@ -6,10 +6,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 type ItemRow = {
   id: string; name: string; category: string | null; note: string | null; product_url: string | null; store_name: string | null;
+  item_type: string | null; specifications: TrackedItem["specifications"] | null;
   product_photo_path: string | null; listed_price_override: TrackedItem["listedPriceOverride"] | null;
   current_product: TrackedItem["currentProduct"] | null; created_at: string;
 };
-type EventRow = { id: string; kind: ItemEvent["kind"]; date: string | null; amount: number | null; currency: string | null; quantity: number | null; variant: string | null; note: string | null; feeling: ItemEvent["feeling"] | null; item_id: string; user_id: string; created_at: string };
+type EventRow = { id: string; kind: ItemEvent["kind"]; date: string | null; amount: number | null; currency: string | null; quantity: number | null; variant: string | null; note: string | null; feeling: ItemEvent["feeling"] | null; attributes: ItemEvent["attributes"] | null; item_id: string; user_id: string; created_at: string };
 type VariantRow = { id: string; name: string; amount: number | null; currency: string | null; item_id: string; user_id: string };
 
 export async function loadTrackerItems(client: SupabaseClient, userId: string): Promise<TrackedItem[]> {
@@ -32,13 +33,15 @@ export async function loadTrackerItems(client: SupabaseClient, userId: string): 
       productPhoto = data?.signedUrl;
     }
     return {
-      id: row.id, name: row.name, category: row.category ?? undefined, note: row.note ?? undefined,
+      id: row.id, name: row.name, category: row.category ?? undefined, itemType: row.item_type ?? undefined,
+      specifications: row.specifications ?? undefined, note: row.note ?? undefined,
       productUrl: row.product_url ?? undefined, storeName: row.store_name ?? undefined, productPhoto, productPhotoPath: row.product_photo_path ?? undefined,
       listedPriceOverride: row.listed_price_override ?? undefined, currentProduct: row.current_product ?? undefined,
       createdAt: row.created_at,
       events: events.filter((entry) => entry.item_id === row.id).map((entry) => ({
         id: entry.id, kind: entry.kind, date: entry.date ?? undefined, amount: entry.amount ?? undefined, currency: entry.currency ?? undefined,
-        quantity: entry.quantity ?? undefined, variant: entry.variant ?? undefined, note: entry.note ?? undefined, feeling: entry.feeling ?? undefined, createdAt: entry.created_at,
+        quantity: entry.quantity ?? undefined, variant: entry.variant ?? undefined, note: entry.note ?? undefined, feeling: entry.feeling ?? undefined,
+        attributes: entry.attributes ?? undefined, createdAt: entry.created_at,
       })),
       variants: variants.filter((entry) => entry.item_id === row.id).map((entry) => ({
         id: entry.id, name: entry.name, amount: entry.amount ?? undefined, currency: entry.currency ?? undefined,
@@ -73,7 +76,8 @@ export async function syncTrackerItems(client: SupabaseClient, userId: string, p
     }
     const photoPath = await uploadPhoto(client, userId, item);
     const { error: itemError } = await client.from("items").upsert({
-      id: item.id, user_id: userId, name: item.name, category: item.category ?? null, note: item.note ?? null,
+      id: item.id, user_id: userId, name: item.name, category: item.category ?? null, item_type: item.itemType ?? null,
+      specifications: item.specifications ?? null, note: item.note ?? null,
       product_url: item.productUrl ?? null, store_name: item.storeName ?? null, product_photo_path: photoPath ?? null,
       listed_price_override: item.listedPriceOverride ?? null, current_product: item.currentProduct ?? null,
       created_at: item.createdAt,
@@ -102,7 +106,8 @@ export async function syncTrackerItems(client: SupabaseClient, userId: string, p
       const { error } = await client.from("events").upsert(newEvents.map((entry) => ({
         id: entry.id, item_id: item.id, user_id: userId, kind: entry.kind, date: entry.date ?? null,
         amount: entry.amount ?? null, currency: entry.currency ?? null, quantity: entry.quantity ?? null,
-        variant: entry.variant ?? null, note: entry.note ?? null, feeling: entry.feeling ?? null, created_at: entry.createdAt,
+        variant: entry.variant ?? null, note: entry.note ?? null, feeling: entry.feeling ?? null,
+        attributes: entry.attributes ?? null, created_at: entry.createdAt,
       })));
       if (error) throw error;
     }
@@ -130,7 +135,8 @@ export async function importTrackerItems(client: SupabaseClient, userId: string,
     const photoPath = await uploadPhoto(client, userId, item, true);
     const safePhotoPath = item.productPhoto?.startsWith("data:image/") ? photoPath : item.productPhotoPath?.startsWith(`${userId}/`) ? item.productPhotoPath : undefined;
     const { error } = await client.from("items").upsert({
-      id: item.id, user_id: userId, name: item.name, category: item.category ?? null, note: item.note ?? null,
+      id: item.id, user_id: userId, name: item.name, category: item.category ?? null, item_type: item.itemType ?? null,
+      specifications: item.specifications ?? null, note: item.note ?? null,
       product_url: item.productUrl ?? null, store_name: item.storeName ?? null, product_photo_path: safePhotoPath ?? null,
       listed_price_override: item.listedPriceOverride ?? null, current_product: item.currentProduct ?? null,
       created_at: item.createdAt,
@@ -144,7 +150,8 @@ export async function importTrackerItems(client: SupabaseClient, userId: string,
       const { error: eventsError } = await client.from("events").upsert(item.events.map((entry) => ({
         id: entry.id, item_id: item.id, user_id: userId, kind: entry.kind, date: entry.date ?? null,
         amount: entry.amount ?? null, currency: entry.currency ?? null, quantity: entry.quantity ?? null,
-        variant: entry.variant ?? null, note: entry.note ?? null, feeling: entry.feeling ?? null, created_at: entry.createdAt,
+        variant: entry.variant ?? null, note: entry.note ?? null, feeling: entry.feeling ?? null,
+        attributes: entry.attributes ?? null, created_at: entry.createdAt,
       })));
       if (eventsError) throw eventsError;
     }
