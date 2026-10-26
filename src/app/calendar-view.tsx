@@ -56,6 +56,7 @@ export function CalendarView({ items, onOpenItem }: { items: TrackedItem[]; onOp
   const today = new Date();
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(() => localDateKey(today));
+  const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const entriesByDate = useMemo(() => {
     const entries = new Map<string, CalendarEntry[]>();
     for (const item of items) {
@@ -110,7 +111,7 @@ export function CalendarView({ items, onOpenItem }: { items: TrackedItem[]; onOp
             const groups = groupByItem(entries);
             const inMonth = day.getMonth() === month.getMonth();
             const isToday = key === localDateKey(today);
-            return <button key={key} className={`calendar-day${inMonth ? "" : " outside-month"}${key === selectedDate ? " selected" : ""}${isToday ? " today" : ""}${entries.length ? " has-events" : ""}`} onClick={() => setSelectedDate(key)} aria-pressed={key === selectedDate} aria-label={`${formatDate(key)}${entries.length ? `, ${entries.length} recorded ${entries.length === 1 ? "event" : "events"}` : ", no recorded events"}`}>
+            return <button key={key} className={`calendar-day${inMonth ? "" : " outside-month"}${key === selectedDate ? " selected" : ""}${isToday ? " today" : ""}${entries.length ? " has-events" : ""}`} onClick={() => { setSelectedDate(key); setDayPanelOpen(true); }} aria-pressed={key === selectedDate} aria-expanded={key === selectedDate ? dayPanelOpen : undefined} aria-label={`${formatDate(key)}${entries.length ? `, ${entries.length} recorded ${entries.length === 1 ? "event" : "events"}` : ", no recorded events"}`}>
               <span className="calendar-day-number">{day.getDate()}</span>
               {entries.length ? <><span className={`calendar-day-photos${groups.length === 1 ? " single" : ""}`}>{groups.slice(0, 3).map(({ item, events }) => <span className="calendar-photo-stack" key={item.id}>
                 {itemPhoto(item) ? <img src={itemPhoto(item)} alt="" referrerPolicy="no-referrer" /> : <i className={`calendar-photo-fallback seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{categoryIcon(item.category)}</i>}
@@ -120,8 +121,8 @@ export function CalendarView({ items, onOpenItem }: { items: TrackedItem[]; onOp
           })}
         </div>
       </section>
-      <aside className="calendar-day-panel" aria-live="polite" aria-label={`Events for ${dateLabel}`}>
-        <div className="calendar-day-panel-heading"><p className="eyebrow">DAY NOTES</p><h2>{dateLabel}</h2><span>{selectedEntries.length ? `${selectedGroups.length} ${selectedGroups.length === 1 ? "item" : "items"}${selectedEntries.length > selectedGroups.length ? ` · ${selectedEntries.length} entries` : ""}` : "Nothing logged"}</span></div>
+      <aside className={`calendar-day-panel${dayPanelOpen ? " mobile-open" : ""}`} aria-live="polite" aria-label={`Events for ${dateLabel}`}>
+        <div className="calendar-day-panel-heading"><div><p className="eyebrow">DAY NOTES</p><h2>{dateLabel}</h2><span>{selectedEntries.length ? `${selectedGroups.length} ${selectedGroups.length === 1 ? "item" : "items"}${selectedEntries.length > selectedGroups.length ? ` · ${selectedEntries.length} entries` : ""}` : "Nothing logged"}</span></div><button type="button" className="icon-button calendar-day-close" onClick={() => setDayPanelOpen(false)} aria-label="Close selected day details">×</button></div>
         {selectedGroups.length ? <div className="calendar-event-list">{selectedGroups.map(({ item, events }) => <button className="calendar-event-card" key={item.id} onClick={() => onOpenItem(item.id)}>
           {itemPhoto(item) ? <span className="calendar-event-photo-wrap"><img src={itemPhoto(item)} alt="" referrerPolicy="no-referrer" />{events.length > 1 ? <span className="calendar-photo-count">×{events.length}</span> : null}</span> : <span className={`calendar-event-fallback seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{categoryIcon(item.category)}{events.length > 1 ? <span className="calendar-photo-count">×{events.length}</span> : null}</span>}
           <span className="calendar-event-copy"><small>{groupEventLabel(events)}</small><strong>{item.name}</strong>{events.map((event) => <span className="calendar-group-event" key={event.id}>{[event.variant, event.attributes ? Object.entries(event.attributes).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") : null, event.amount !== undefined ? formatMoney(event.amount, event.currency) : null, event.note].filter(Boolean).join(" · ")}</span>)}</span>

@@ -92,6 +92,8 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [deliveryPin, setDeliveryPin] = useState("");
   const [addName, setAddName] = useState("");
@@ -123,10 +125,141 @@ export default function Home() {
   const [photoOffsetX, setPhotoOffsetX] = useState(0);
   const [photoOffsetY, setPhotoOffsetY] = useState(0);
   const nameInput = useRef<HTMLInputElement>(null);
+  const formCloseButton = useRef<HTMLButtonElement>(null);
+  const profileCloseButton = useRef<HTMLButtonElement>(null);
+  const formReturnFocus = useRef<HTMLElement | null>(null);
+  const profileReturnFocus = useRef<HTMLElement | null>(null);
+  const profileMenu = useRef<HTMLDivElement>(null);
+  const moreMenu = useRef<HTMLDivElement>(null);
+  const libraryScroll = useRef(0);
+  const returnFilters = useRef<{ search: string; category: string } | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const productPhotoInput = useRef<HTMLInputElement>(null);
   const lastSyncedItems = useRef<TrackedItem[]>([]);
   const syncQueue = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 920px)");
+    const update = () => setIsMobileLayout(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const updateHeight = () => document.documentElement.style.setProperty("--visual-height", `${viewport.height}px`);
+    updateHeight();
+    viewport.addEventListener("resize", updateHeight);
+    viewport.addEventListener("scroll", updateHeight);
+    return () => {
+      viewport.removeEventListener("resize", updateHeight);
+      viewport.removeEventListener("scroll", updateHeight);
+      document.documentElement.style.removeProperty("--visual-height");
+    };
+  }, []);
+
+  useEffect(() => {
+    const shouldBlockPage = Boolean(modal) || (profileOpen && isMobileLayout);
+    if (shouldBlockPage) {
+      document.body.classList.add("overlay-open");
+      const scrollY = window.scrollY;
+      if (isMobileLayout) {
+        document.body.style.position = "fixed";
+        document.body.style.top = `-${scrollY}px`;
+        document.body.style.width = "100%";
+      }
+      return () => {
+        document.body.classList.remove("overlay-open");
+        document.body.style.position = "";
+        document.body.style.top = "";
+        document.body.style.width = "";
+        if (isMobileLayout) window.scrollTo({ top: scrollY, behavior: "instant" });
+      };
+    }
+    document.body.classList.remove("overlay-open");
+  }, [modal, profileOpen, isMobileLayout]);
+
+  useEffect(() => {
+    if (!modal) {
+      formReturnFocus.current?.focus({ preventScroll: true });
+      formReturnFocus.current = null;
+      return;
+    }
+    requestAnimationFrame(() => formCloseButton.current?.focus({ preventScroll: true }));
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const dialog = document.querySelector<HTMLElement>(".inline-form-card[role='dialog']");
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setModal(null);
+        setFormError("");
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, a[href]")].filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [modal]);
+
+  useEffect(() => {
+    if (!profileOpen && !moreOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (profileOpen && !profileMenu.current?.contains(target)) setProfileOpen(false);
+      if (moreOpen && !moreMenu.current?.contains(target)) setMoreOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setProfileOpen(false);
+      setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profileOpen, moreOpen]);
+
+  useEffect(() => {
+    if (!profileOpen) {
+      profileReturnFocus.current?.focus({ preventScroll: true });
+      profileReturnFocus.current = null;
+      return;
+    }
+    profileReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    requestAnimationFrame(() => profileCloseButton.current?.focus({ preventScroll: true }));
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setProfileOpen(false); return; }
+      if (event.key !== "Tab") return;
+      const dialog = profileMenu.current?.querySelector<HTMLElement>(".profile-popover");
+      if (!dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]")].filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+      if (!focusable.length) return;
+      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1)?.focus(); }
+      else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+    };
+    document.addEventListener("keydown", trapFocus);
+    return () => document.removeEventListener("keydown", trapFocus);
+  }, [profileOpen]);
+
+  useEffect(() => {
+    if (!isMobileLayout || view !== "library" || selectedId) return;
+    requestAnimationFrame(() => window.scrollTo({ top: libraryScroll.current, behavior: "instant" }));
+  }, [isMobileLayout, selectedId, view]);
+
+  useEffect(() => {
+    if (!isMobileLayout || view !== "library" || !selectedId) return;
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [isMobileLayout, selectedId, view]);
+
   useEffect(() => {
     if (supabaseConfigured) {
       const supabase = createClient();
@@ -300,10 +433,46 @@ export default function Home() {
   }
 
   function openAddItem() {
+    formReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAddCategory(""); setAddItemType(""); setAddSpecifications({}); setAddCustomFields([]); setAddPurchaseAttributes({});
     setAddName(""); setAddNameTouched(false); setAddProductUrl(""); setAddStoreName(""); setAddStoreEdited(false);
     setAddPreview(null); setAddPreviewStatus("idle"); setAddImageUrl(""); setAddListedPrice(""); setAddListedCurrency("INR"); setAddPriceEdited(false);
     setFormError(""); setModal("item");
+  }
+
+  function openItemOnMobile(id: string) {
+    if (isMobileLayout) libraryScroll.current = window.scrollY;
+    setSelectedId(id);
+  }
+
+  function closeMobileItem() {
+    setSelectedId(null);
+    if (returnFilters.current) {
+      setSearch(returnFilters.current.search);
+      setCategory(returnFilters.current.category);
+      returnFilters.current = null;
+    }
+  }
+
+  function openCalendarItem(id: string) {
+    if (isMobileLayout) {
+      libraryScroll.current = 0;
+      if (!visibleItems.some((item) => item.id === id)) returnFilters.current = { search, category };
+    }
+    setSelectedId(id);
+    setCategory("All things");
+    setSearch("");
+    setView("library");
+  }
+
+  function openEventForm(kind: EventKind) {
+    formReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openEvent(kind);
+  }
+
+  function openVariantForm(variantId?: string) {
+    formReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openVariant(variantId);
   }
 
   function changeAddProductUrl(value: string) {
@@ -703,12 +872,14 @@ export default function Home() {
     }
   }
 
-  const itemForm = modal === "item" ? <section className="inline-form-card" aria-labelledby="add-title">
-    <div className="dialog-top"><div><p className="eyebrow">NEW OBJECT RECORD</p><h2 id="add-title">Add a thing<span className="period">.</span></h2></div><button className="icon-button" onClick={() => { setModal(null); setFormError(""); }} aria-label="Close add item form"><Icon name="close" /></button></div>
+  const itemForm = modal === "item" ? <section className="inline-form-card" role="dialog" aria-modal={isMobileLayout} aria-labelledby="add-title">
+    <div className="dialog-top"><div><p className="eyebrow">NEW OBJECT RECORD</p><h2 id="add-title">Add a thing<span className="period">.</span></h2></div><button ref={formCloseButton} className="icon-button" onClick={() => { setModal(null); setFormError(""); }} aria-label="Close add item form"><Icon name="close" /></button></div>
     <p className="dialog-intro">Only the name is needed. Fill in anything else you remember.</p>
     {formError ? <p className="form-error" id="item-form-error" role="alert">{formError}</p> : null}
-    <form onSubmit={saveItem} className="entry-form" noValidate>
-      <label className="field"><span>Thing name <b>REQUIRED</b></span><input ref={nameInput} name="name" value={addName} maxLength={80} autoFocus placeholder="e.g. Everyday watch" aria-required="true" aria-invalid={formError === "Please add a name before saving."} aria-describedby={formError === "Please add a name before saving." ? "item-form-error" : undefined} onChange={(event) => { setAddName(event.target.value); setAddNameTouched(true); setFormError(""); }} /></label>
+    <form onSubmit={saveItem} className="entry-form" autoComplete="off" noValidate>
+      <label className="field"><span>Thing name <b>REQUIRED</b></span><input ref={nameInput} name="name" value={addName} maxLength={80} autoFocus={!isMobileLayout} autoCorrect="off" autoCapitalize="sentences" placeholder="e.g. Everyday watch" aria-required="true" aria-invalid={formError === "Please add a name before saving."} aria-describedby={formError === "Please add a name before saving." ? "item-form-error" : undefined} onChange={(event) => { setAddName(event.target.value); setAddNameTouched(true); setFormError(""); }} /></label>
+      <details className="more-item-details" open={!isMobileLayout}>
+        <summary>Optional details <span>Category, product link, price and more</span></summary>
       <div className="field-pair">
         <label className="field"><span>Category <b>OPTIONAL</b></span><select name="category" value={addCategory} onChange={(event) => setAddCategory(event.target.value)}><option value="">Choose if useful</option>{CATEGORIES.map((option) => <option key={option}>{option}</option>)}</select></label>
         <label className="field"><span>Item type <b>OPTIONAL</b></span><input value={addItemType} onChange={(event) => setAddItemType(event.target.value)} list="item-type-options" maxLength={100} placeholder="e.g. hoodie" /><datalist id="item-type-options">{Array.from(new Set(ITEM_TYPES[addCategory] ?? Object.values(ITEM_TYPES).flat())).map((type) => <option key={type} value={type} />)}</datalist></label>
@@ -742,14 +913,15 @@ export default function Home() {
       </div> : null}
       <div className="field-pair"><label className="field"><span>Date</span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label><label className="field"><span>{addCategory === "Clothes" ? "Paid for this piece" : "What you paid"}</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div>{addCategory === "Clothes" ? <small className="field-hint">Each garment gets its own purchase entry.</small> : null}</label></div>
       <label className="field"><span>A note <b>OPTIONAL</b></span><textarea name="note" rows={2} maxLength={240} placeholder="Anything else to remember…" /></label>
+      </details>
       <div className="dialog-footer"><span>{user ? "Saved to your account." : "Saved in this browser."}</span><button className="button button-primary" type="submit">Save this thing <Icon name="arrow" size={16} /></button></div>
     </form>
   </section> : null;
 
-  const eventForm = modal === "event" && selectedItem ? <section className="inline-form-card detail-inline-form" aria-labelledby="event-title">
-    <div className="dialog-top"><div><p className="eyebrow">{selectedItem.name} / ADD TO THE STORY</p><h2 id="event-title">{eventKind === "purchase" ? "A purchase" : eventKind === "service" ? "Some upkeep" : "A use note"}<span className="period">.</span></h2></div><button className="icon-button" onClick={() => setModal(null)} aria-label="Close history form"><Icon name="close" /></button></div>
+  const eventForm = modal === "event" && selectedItem ? <section className="inline-form-card detail-inline-form" role="dialog" aria-modal={isMobileLayout} aria-labelledby="event-title">
+    <div className="dialog-top"><div><p className="eyebrow">{selectedItem.name} / ADD TO THE STORY</p><h2 id="event-title">{eventKind === "purchase" ? "A purchase" : eventKind === "service" ? "Some upkeep" : "A use note"}<span className="period">.</span></h2></div><button ref={formCloseButton} className="icon-button" onClick={() => setModal(null)} aria-label="Close history form"><Icon name="close" /></button></div>
     <p className="dialog-intro">Write down what you remember. You can leave any field blank.</p>
-    <form onSubmit={saveEvent} className="entry-form" noValidate>
+    <form onSubmit={saveEvent} className="entry-form" autoComplete="off" noValidate>
       <label className="field"><span>Date <b>OPTIONAL</b></span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label>
       {eventKind !== "use" ? <label className="field"><span>{eventKind === "purchase" ? selectedItem.category === "Clothes" ? "Paid for this piece" : "Total you paid" : "Service cost"} <b>OPTIONAL</b></span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div>{eventKind === "purchase" ? <small className="field-hint">{selectedItem.category === "Clothes" ? "Log one garment per entry, including its own price and size." : "Enter the total for these units after discounts, card offers, or bundles."}</small> : null}</label> : null}
       {eventKind === "purchase" && selectedPurchaseFields.length ? <div className="attribute-fields purchase-attribute-fields">{selectedPurchaseFields.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input name={`purchase-attribute-${field.key}`} maxLength={120} placeholder={field.placeholder} /></label>)}</div> : null}
@@ -764,12 +936,12 @@ export default function Home() {
     </form>
   </section> : null;
 
-  const variantForm = modal === "variant" && selectedItem ? <section className="inline-form-card detail-inline-form" aria-labelledby="variant-title">
-    <div className="dialog-top"><div><p className="eyebrow">{selectedItem.name} / OPTIONS</p><h2 id="variant-title">{editingVariantId ? "Edit a variant" : "Add a variant"}<span className="period">.</span></h2></div><button className="icon-button" onClick={() => { setModal(null); setEditingVariantId(null); }} aria-label="Close variant form"><Icon name="close" /></button></div>
+  const variantForm = modal === "variant" && selectedItem ? <section className="inline-form-card detail-inline-form" role="dialog" aria-modal={isMobileLayout} aria-labelledby="variant-title">
+    <div className="dialog-top"><div><p className="eyebrow">{selectedItem.name} / OPTIONS</p><h2 id="variant-title">{editingVariantId ? "Edit a variant" : "Add a variant"}<span className="period">.</span></h2></div><button ref={formCloseButton} className="icon-button" onClick={() => { setModal(null); setEditingVariantId(null); }} aria-label="Close variant form"><Icon name="close" /></button></div>
     <p className="dialog-intro">Save a size, color, or other option with its current listed price.</p>
     {formError ? <p className="form-error" id="variant-form-error" role="alert">{formError}</p> : null}
-    <form onSubmit={saveVariant} className="entry-form" noValidate>
-      <label className="field"><span>Variant name <b>REQUIRED</b></span><input ref={nameInput} name="name" maxLength={120} autoFocus defaultValue={selectedItem.variants?.find((variant) => variant.id === editingVariantId)?.name ?? ""} placeholder="e.g. 100g tube" aria-required="true" aria-invalid={Boolean(formError)} aria-describedby={formError ? "variant-form-error" : undefined} onChange={() => setFormError("")} /></label>
+    <form onSubmit={saveVariant} className="entry-form" autoComplete="off" noValidate>
+      <label className="field"><span>Variant name <b>REQUIRED</b></span><input ref={nameInput} name="name" maxLength={120} autoFocus={!isMobileLayout} autoCorrect="off" autoCapitalize="sentences" defaultValue={selectedItem.variants?.find((variant) => variant.id === editingVariantId)?.name ?? ""} placeholder="e.g. 100g tube" aria-required="true" aria-invalid={Boolean(formError)} aria-describedby={formError ? "variant-form-error" : undefined} onChange={() => setFormError("")} /></label>
       <label className="field"><span>Current listed price <b>OPTIONAL</b></span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={selectedItem.variants?.find((variant) => variant.id === editingVariantId)?.amount ?? ""} placeholder="—" /><select name="currency" aria-label="Currency" defaultValue={selectedItem.variants?.find((variant) => variant.id === editingVariantId)?.currency ?? "INR"}>{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label>
       <div className="dialog-footer"><span>What you paid goes in each purchase entry.</span><button className="button button-primary" type="submit">Save variant <Icon name="arrow" size={16} /></button></div>
     </form>
@@ -792,12 +964,19 @@ export default function Home() {
             <Icon name="download" size={16} /><span>Back up</span>
           </button>
           <button className="quiet-button restore-button" onClick={() => importInput.current?.click()}><Icon name="upload" size={16} /><span>Restore</span></button>
-          {user ? <div className="profile-menu-wrap">
+          <div className="more-menu-wrap" ref={moreMenu}>
+            <button className="quiet-button more-menu-trigger" aria-expanded={moreOpen} aria-haspopup="menu" onClick={() => setMoreOpen((open) => !open)}>More <span aria-hidden="true">⌄</span></button>
+            {moreOpen ? <div className="more-menu" role="menu" aria-label="More actions">
+              <button role="menuitem" onClick={() => { exportBackup(); setMoreOpen(false); }} disabled={!items.length}><Icon name="download" size={16} /> Back up</button>
+              <button role="menuitem" onClick={() => { importInput.current?.click(); setMoreOpen(false); }}><Icon name="upload" size={16} /> Restore</button>
+            </div> : null}
+          </div>
+          {user ? <div className="profile-menu-wrap" ref={profileMenu}>
             <button className="profile-trigger" onClick={() => { setDeliveryPin(String(user.user_metadata?.kept_delivery_pin ?? "")); setProfileOpen((open) => !open); }} aria-expanded={profileOpen} aria-haspopup="dialog" aria-label="Open profile settings">
               <span className={`profile-avatar mascot-${profileMascot}`}><MascotMark name={profileMascot} /></span><span className="profile-trigger-label">Profile</span>
             </button>
-            {profileOpen ? <section className="profile-popover" role="dialog" aria-label="Profile settings">
-              <div className="profile-popover-heading"><div><p className="eyebrow">YOUR ACCOUNT</p><strong>Profile picture</strong></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile settings"><Icon name="close" size={16} /></button></div>
+            {profileOpen ? <section className="profile-popover" role="dialog" aria-modal={isMobileLayout} aria-label="Profile settings">
+              <div className="profile-popover-heading"><div><p className="eyebrow">YOUR ACCOUNT</p><strong>Profile picture</strong></div><button ref={profileCloseButton} className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile settings"><Icon name="close" size={16} /></button></div>
               <p className="profile-email">{user.email}</p>
               <p className="profile-prompt">Choose a little mascot for your account.</p>
               <div className="mascot-grid" aria-label="Profile picture options">
@@ -818,8 +997,8 @@ export default function Home() {
       </header>
 
       <nav className="view-switch" aria-label="Main views">
-        <button type="button" className={view === "library" ? "active" : ""} aria-current={view === "library" ? "page" : undefined} onClick={() => setView("library")}>Library</button>
-        <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => setView("calendar")}>Calendar</button>
+        <button type="button" className={view === "library" ? "active" : ""} aria-current={view === "library" ? "page" : undefined} onClick={() => { setView("library"); setSelectedId(null); }}>Library</button>
+        <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => { setView("calendar"); setSelectedId(null); }}>Calendar</button>
       </nav>
 
       <div id="main-content">
@@ -845,7 +1024,7 @@ export default function Home() {
         {stats.totals.length ? <div className="summary-cell summary-spend">{stats.totals.map(([currency, total]) => <strong className="summary-money" key={currency}>{formatMoney(total, currency)} <small>{currency}</small></strong>)}<span className="summary-caption">recorded spend</span></div> : null}
       </section>}
 
-      <section className={`workspace ${selectedItem ? "" : "workspace-empty"}`} id="library" aria-labelledby="library-title">
+      <section className={`workspace${selectedItem ? "" : " workspace-empty"}${isMobileLayout && selectedId ? " mobile-detail-open" : ""}`} id="library" aria-labelledby="library-title">
         <div className="library-column">
           <div className="section-heading">
             <div><p className="eyebrow section-eyebrow">YOUR LIBRARY</p><h2 id="library-title">Your things<span className="period">.</span></h2></div>
@@ -866,7 +1045,7 @@ export default function Home() {
               const lastPurchase = lastOfKind(item, "purchase");
               const lastService = lastOfKind(item, "service");
               const isActive = item.id === (selectedItem?.id ?? visibleItems[0]?.id);
-              return <button className={`item-row ${isActive ? "selected" : ""}`} key={item.id} onClick={() => setSelectedId(item.id)} aria-pressed={isActive}>
+              return <button className={`item-row ${isActive ? "selected" : ""}`} key={item.id} onClick={() => openItemOnMobile(item.id)} aria-pressed={isActive}>
                 <span className={`item-number ${index % 3 === 1 ? "number-soft" : ""}`}>{String(index + 1).padStart(2, "0")}</span>
                 {item.productPhoto || item.currentProduct?.imageUrl || fallbackItemImage(item) ? <img className="item-thumbnail" src={item.productPhoto || item.currentProduct?.imageUrl || fallbackItemImage(item)} alt="" referrerPolicy="no-referrer" /> : <span className={`item-seal seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true"><span>{item.name.trim().charAt(0).toUpperCase()}</span></span>}
                 <span className="item-main"><strong>{item.name}</strong><small>{[item.category || "Unsorted", item.itemType].filter(Boolean).join(" · ")}{totalUnits > 1 ? <span> · {totalUnits} units</span> : buys.length > 1 ? <span> · {buys.length} buys</span> : null}</small></span>
@@ -882,7 +1061,7 @@ export default function Home() {
 
         {selectedItem ? <aside className="detail-column" aria-label={`${selectedItem.name} details`}>
           <div className="detail-record" key={selectedItem.id}>
-            <div className="detail-topline"><span className="eyebrow">OBJECT RECORD <span>/ {String(items.findIndex((item) => item.id === selectedItem.id) + 1).padStart(2, "0")}</span></span><button className="icon-button remove-item" onClick={() => removeItem(selectedItem)} aria-label={`Remove ${selectedItem.name}`} title="Remove this thing"><Icon name="trash" size={17} /></button></div>
+            <div className="detail-topline"><button className="mobile-back-button" onClick={closeMobileItem}><span aria-hidden="true">←</span> Library</button><span className="eyebrow">OBJECT RECORD <span>/ {String(items.findIndex((item) => item.id === selectedItem.id) + 1).padStart(2, "0")}</span></span><button className="icon-button remove-item" onClick={() => removeItem(selectedItem)} aria-label={`Remove ${selectedItem.name}`} title="Remove this thing"><Icon name="trash" size={17} /></button></div>
             <div className="detail-heading"><span className={`detail-seal seal-${(selectedItem.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</span><div><span className="detail-category">{[selectedItem.category || "UNCATEGORIZED", selectedItem.itemType].filter(Boolean).join(" · ")}</span><h3>{selectedItem.name}</h3></div></div>
             {selectedItem.note ? <p className="item-note">{selectedItem.note}</p> : null}
             {selectedItem.specifications && Object.entries(selectedItem.specifications).some(([, value]) => value) ? <dl className="item-specifications">{Object.entries(selectedItem.specifications).filter(([, value]) => value).map(([key, value]) => <div key={key}><dt>{attributeLabel(key)}</dt><dd>{value}</dd></div>)}</dl> : null}
@@ -933,12 +1112,12 @@ export default function Home() {
               </section> : null}
             </section>
             {(selectedItem.variants?.length || selectedItem.productUrl) ? <section className="variants-panel" aria-label="Product variants">
-              <div className="variants-heading"><div><p className="eyebrow">OPTIONS</p><h4>Sizes & options</h4></div><button className="button button-outline" onClick={() => openVariant()}><Icon name="plus" size={15} /> Add option</button></div>
+              <div className="variants-heading"><div><p className="eyebrow">OPTIONS</p><h4>Sizes & options</h4></div><button className="button button-outline" onClick={() => openVariantForm()}><Icon name="plus" size={15} /> Add option</button></div>
               {selectedItem.variants?.length ? <ul className="variant-list">{selectedItem.variants.map((variant) => <li key={variant.id}>
                 <span><strong>{variant.name}</strong>{variant.amount !== undefined ? <small>{formatMoney(variant.amount, variant.currency)}</small> : <small>Price not added</small>}</span>
-                <span className="variant-actions"><button className="text-button" onClick={() => openVariant(variant.id)}>Edit</button><button className="text-button" onClick={() => removeVariant(variant)}>Remove</button></span>
+                <span className="variant-actions"><button className="text-button" onClick={() => openVariantForm(variant.id)}>Edit</button><button className="text-button" onClick={() => removeVariant(variant)}>Remove</button></span>
               </li>)}</ul> : <p className="variant-hint">Add a size or option and its price.</p>}
-            </section> : <div className="variants-invite"><button className="text-button" onClick={() => openVariant()}>Add a size or variant</button></div>}
+            </section> : <div className="variants-invite"><button className="text-button" onClick={() => openVariantForm()}>Add a size or variant</button></div>}
             {variantForm}
             <div className="detail-facts">
               <div><span>OWNED</span><strong>{formatAgeFromEvent(selectedItem)}</strong></div>
@@ -957,13 +1136,18 @@ export default function Home() {
                 </div><button className="entry-remove" onClick={() => removeEvent(event.id)} aria-label={`Remove ${labelForKind(event.kind)} entry ${index + 1}`} title="Remove entry"><Icon name="close" size={14} /></button>
               </article>) : <div className="timeline-empty"><span className="timeline-empty-dot" /><p>No history yet.</p></div>}
             </div>
-            <div className="detail-actions"><button className="button button-outline" onClick={() => openEvent("purchase")}><Icon name="plus" size={16} /> Add purchase</button><button className="button button-outline" onClick={() => openEvent("service")}><Icon name="plus" size={16} /> Log upkeep</button><button className="button button-outline" onClick={() => openEvent("use")}><Icon name="plus" size={16} /> Add a note</button></div>
+            <div className="detail-actions"><button className="button button-outline" onClick={() => openEventForm("purchase")}><Icon name="plus" size={16} /> Add purchase</button><button className="button button-outline" onClick={() => openEventForm("service")}><Icon name="plus" size={16} /> Log upkeep</button><button className="button button-outline" onClick={() => openEventForm("use")}><Icon name="plus" size={16} /> Add a note</button></div>
             {eventForm}
           </div>
         </aside> : null}
       </section>
-      </> : <CalendarView items={items} onOpenItem={(id) => { setSelectedId(id); setCategory("All things"); setSearch(""); setView("library"); }} />}
+      </> : <CalendarView items={items} onOpenItem={openCalendarItem} />}
       </div>
+
+      <nav className="mobile-tabbar" aria-label="Primary navigation">
+        <button type="button" className={view === "library" ? "active" : ""} aria-current={view === "library" ? "page" : undefined} onClick={() => { setView("library"); setSelectedId(null); }}><span aria-hidden="true">▤</span>Library</button>
+        <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => { setView("calendar"); setSelectedId(null); }}><span aria-hidden="true">▦</span>Calendar</button>
+      </nav>
 
       <footer className="page-footer"><Link className="footer-brand" href="/">kept<span>.</span></Link></footer>
 
