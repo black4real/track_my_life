@@ -78,7 +78,11 @@ export async function syncTrackerItems(client: SupabaseClient, userId: string, p
 
   for (const item of next) {
     const old = previousById.get(item.id);
-    if (old && JSON.stringify({ ...old, productPhoto: undefined }) === JSON.stringify({ ...item, productPhoto: undefined })) {
+    // productPhoto is normally ignored because a signed URL can change on reload.
+    // A cropped upload is a data URL until Storage returns its path, so it must
+    // force a sync even when every other item field is unchanged.
+    const photoUploadPending = item.productPhoto?.startsWith("data:image/") && !item.productPhotoPath?.startsWith(`${userId}/`);
+    if (old && !photoUploadPending && JSON.stringify({ ...old, productPhoto: undefined }) === JSON.stringify({ ...item, productPhoto: undefined })) {
       normalized.set(item.id, item.productPhotoPath);
       continue;
     }

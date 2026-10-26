@@ -8,6 +8,7 @@ import type { ItemEvent, TrackedItem } from "@/lib/tracker";
 import { formatDate, formatMoney } from "@/lib/tracker";
 
 type CalendarEntry = { item: TrackedItem; event: ItemEvent };
+type CalendarGroup = { item: TrackedItem; events: ItemEvent[] };
 
 function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -19,6 +20,22 @@ function eventLabel(kind: ItemEvent["kind"]) {
 
 function itemPhoto(item: TrackedItem) {
   return item.productPhoto || item.currentProduct?.imageUrl;
+}
+
+function groupByItem(entries: CalendarEntry[]): CalendarGroup[] {
+  const groups = new Map<string, CalendarGroup>();
+  for (const { item, event } of entries) {
+    const group = groups.get(item.id);
+    if (group) group.events.push(event);
+    else groups.set(item.id, { item, events: [event] });
+  }
+  return [...groups.values()];
+}
+
+function groupEventLabel(events: ItemEvent[]) {
+  const counts = new Map<string, number>();
+  for (const event of events) counts.set(eventLabel(event.kind), (counts.get(eventLabel(event.kind)) ?? 0) + 1);
+  return [...counts].map(([label, count]) => `${label}${count > 1 ? ` ×${count}` : ""}`).join(" · ");
 }
 
 function categoryIcon(category?: string) {
@@ -58,7 +75,8 @@ export function CalendarView({ items, onOpenItem }: { items: TrackedItem[]; onOp
     const start = new Date(first.getFullYear(), first.getMonth(), 1 - first.getDay());
     return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
   }, [month]);
-  const selectedEntries = entriesByDate.get(selectedDate) ?? [];
+  const selectedEntries = useMemo(() => entriesByDate.get(selectedDate) ?? [], [entriesByDate, selectedDate]);
+  const selectedGroups = useMemo(() => groupByItem(selectedEntries), [selectedEntries]);
   const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(month);
   const dateLabel = selectedDate ? formatDate(selectedDate) : "Choose a date";
 
@@ -89,22 +107,24 @@ export function CalendarView({ items, onOpenItem }: { items: TrackedItem[]; onOp
           {days.map((day) => {
             const key = localDateKey(day);
             const entries = entriesByDate.get(key) ?? [];
+            const groups = groupByItem(entries);
             const inMonth = day.getMonth() === month.getMonth();
             const isToday = key === localDateKey(today);
             return <button key={key} className={`calendar-day${inMonth ? "" : " outside-month"}${key === selectedDate ? " selected" : ""}${isToday ? " today" : ""}${entries.length ? " has-events" : ""}`} onClick={() => setSelectedDate(key)} aria-pressed={key === selectedDate} aria-label={`${formatDate(key)}${entries.length ? `, ${entries.length} recorded ${entries.length === 1 ? "event" : "events"}` : ", no recorded events"}`}>
               <span className="calendar-day-number">{day.getDate()}</span>
-              {entries.length ? <><span className="calendar-day-photos">{entries.slice(0, 3).map(({ item, event }) => itemPhoto(item)
-                ? <img key={event.id} src={itemPhoto(item)} alt="" referrerPolicy="no-referrer" />
-                : <i key={event.id} className={`calendar-photo-fallback seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{categoryIcon(item.category)}</i>)}</span><span className="calendar-event-count">{entries.length} {entries.length === 1 ? "entry" : "entries"}</span></> : <span className="calendar-empty-mark" aria-hidden="true" />}
+              {entries.length ? <><span className={`calendar-day-photos${groups.length === 1 ? " single" : ""}`}>{groups.slice(0, 3).map(({ item, events }) => <span className="calendar-photo-stack" key={item.id}>
+                {itemPhoto(item) ? <img src={itemPhoto(item)} alt="" referrerPolicy="no-referrer" /> : <i className={`calendar-photo-fallback seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{categoryIcon(item.category)}</i>}
+                {events.length > 1 ? <span className="calendar-photo-count" aria-label={`${events.length} entries for ${item.name}`}>×{events.length}</span> : null}
+              </span>)}</span><span className="calendar-event-count">{groups.length} {groups.length === 1 ? "item" : "items"}{entries.length > groups.length ? ` · ${entries.length} entries` : ""}</span></> : <span className="calendar-empty-mark" aria-hidden="true" />}
             </button>;
           })}
         </div>
       </section>
       <aside className="calendar-day-panel" aria-live="polite" aria-label={`Events for ${dateLabel}`}>
-        <div className="calendar-day-panel-heading"><p className="eyebrow">DAY NOTES</p><h2>{dateLabel}</h2><span>{selectedEntries.length ? `${selectedEntries.length} ${selectedEntries.length === 1 ? "entry" : "entries"}` : "Nothing logged"}</span></div>
-        {selectedEntries.length ? <div className="calendar-event-list">{selectedEntries.map(({ item, event }) => <button className="calendar-event-card" key={event.id} onClick={() => onOpenItem(item.id)}>
-          {itemPhoto(item) ? <img src={itemPhoto(item)} alt="" referrerPolicy="no-referrer" /> : <span className={`calendar-event-fallback seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{categoryIcon(item.category)}</span>}
-          <span className="calendar-event-copy"><small>{eventLabel(event.kind)}</small><strong>{item.name}</strong>{event.variant ? <span>{event.variant}</span> : null}{event.attributes ? <span>{Object.entries(event.attributes).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ")}</span> : null}{event.amount !== undefined ? <span>{formatMoney(event.amount, event.currency)}</span> : null}{event.note ? <span className="calendar-event-note">{event.note}</span> : null}</span>
+        <div className="calendar-day-panel-heading"><p className="eyebrow">DAY NOTES</p><h2>{dateLabel}</h2><span>{selectedEntries.length ? `${selectedGroups.length} ${selectedGroups.length === 1 ? "item" : "items"}${selectedEntries.length > selectedGroups.length ? ` · ${selectedEntries.length} entries` : ""}` : "Nothing logged"}</span></div>
+        {selectedGroups.length ? <div className="calendar-event-list">{selectedGroups.map(({ item, events }) => <button className="calendar-event-card" key={item.id} onClick={() => onOpenItem(item.id)}>
+          {itemPhoto(item) ? <span className="calendar-event-photo-wrap"><img src={itemPhoto(item)} alt="" referrerPolicy="no-referrer" />{events.length > 1 ? <span className="calendar-photo-count">×{events.length}</span> : null}</span> : <span className={`calendar-event-fallback seal-${(item.category || "other").toLowerCase().replace(/[^a-z]/g, "")}`} aria-hidden="true">{categoryIcon(item.category)}{events.length > 1 ? <span className="calendar-photo-count">×{events.length}</span> : null}</span>}
+          <span className="calendar-event-copy"><small>{groupEventLabel(events)}</small><strong>{item.name}</strong>{events.map((event) => <span className="calendar-group-event" key={event.id}>{[event.variant, event.attributes ? Object.entries(event.attributes).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") : null, event.amount !== undefined ? formatMoney(event.amount, event.currency) : null, event.note].filter(Boolean).join(" · ")}</span>)}</span>
           <span className="calendar-event-arrow" aria-hidden="true">→</span>
         </button>)}</div> : <div className="calendar-day-empty"><span aria-hidden="true">·</span><p>This day has no dated entries.</p><small>Add a date to a purchase, care note, or use note to see it here.</small></div>}
       </aside>
