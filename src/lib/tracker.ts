@@ -49,7 +49,7 @@ export type BackupFile = {
 };
 
 export const STORAGE_KEY = "kept-tracker-v1";
-export const CATEGORIES = ["Clothes", "Accessories", "Tech", "Skincare", "Home", "Vehicle", "Other"];
+export const CATEGORIES = ["Clothes", "Accessories", "Tech", "Health", "Fitness", "Skincare", "Home", "Vehicle", "Other"];
 
 function isSafeHttpsUrl(value: string) {
   try {

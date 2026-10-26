@@ -50,7 +50,7 @@ Selected: the field ledger, because it naturally joins purchases, service, use, 
 
 ## Account and migration states
 
-- Account access uses the same field-ledger visual language: a focused sign-in card, real labels, one primary action, and a plain explanation that access is invite-only.
+- Account access uses the same field-ledger visual language: a focused sign-in card, real labels, one primary action, and a clear switch between signing in and creating an account.
 - The migration invitation is an in-page ledger note rather than a blocking dialog. It names the local record and photo counts, explains what will be copied, and gives equal clarity to importing or waiting.
 - Signed-in records belong to an account in Supabase; the existing local record store remains untouched until the owner chooses whether to import it.
 - Product photos live in a private storage bucket. The app uses short-lived signed image links and database ownership policies; it never displays an administrative database credential.

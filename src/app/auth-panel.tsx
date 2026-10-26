@@ -5,7 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 export function AuthPanel({ email }: { email?: string }) {
-  const [mode, setMode] = useState<"sign-in" | "reset">("sign-in");
+  const [mode, setMode] = useState<"sign-in" | "sign-up" | "reset">("sign-in");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -34,7 +34,15 @@ export function AuthPanel({ email }: { email?: string }) {
       if (mode === "reset") {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(address, { redirectTo: `${window.location.origin}/auth/callback?next=/reset-password` });
         if (resetError) throw resetError;
-        setMessage("If that email has an invitation, a password reset link is on its way.");
+        setMessage("If an account exists for that email, a password reset link is on its way.");
+      } else if (mode === "sign-up") {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: address,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        });
+        if (signUpError) throw signUpError;
+        if (!data.session) setMessage("Account created. Check your email to confirm it, then come back to sign in.");
       } else {
         const { error: loginError } = await supabase.auth.signInWithPassword({ email: address, password });
         if (loginError) throw loginError;
@@ -65,13 +73,13 @@ export function AuthPanel({ email }: { email?: string }) {
       {message ? <p className="auth-message" role="status">{message}</p> : null}
       <form id="sign-in-form" onSubmit={submit} className="entry-form auth-form">
         <label className="field"><span>Email</span><input name="email" type="email" autoComplete="email" required /></label>
-        {mode === "sign-in" ? <label className="field"><span>Password</span><input name="password" type="password" autoComplete="current-password" required /></label> : null}
+        {mode !== "reset" ? <label className="field"><span>Password</span><input name="password" type="password" autoComplete={mode === "sign-up" ? "new-password" : "current-password"} minLength={mode === "sign-up" ? 8 : undefined} required /></label> : null}
         {mode === "sign-in" ? <button className="text-button auth-reset" type="button" onClick={() => { setMode("reset"); setError(""); setMessage(""); }}>Forgot your password?</button> : null}
-        <button className="button button-primary auth-submit" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "reset" ? "Send reset link" : "Sign in"}<span aria-hidden="true">→</span></button>
-        {mode === "reset" ? <button className="text-button" type="button" onClick={() => { setMode("sign-in"); setError(""); setMessage(""); }}>Back to sign in</button> : null}
+        <button className="button button-primary auth-submit" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "reset" ? "Send reset link" : mode === "sign-up" ? "Create account" : "Sign in"}<span aria-hidden="true">→</span></button>
+        {mode !== "sign-in" ? <button className="text-button" type="button" onClick={() => { setMode("sign-in"); setError(""); setMessage(""); }}>Back to sign in</button> : null}
       </form>
       {mode === "sign-in" ? <><div className="auth-separator"><span>OR</span></div><button className="button button-outline auth-google" type="button" disabled={busy} onClick={signInWithGoogle}><GoogleMark /> Continue with Google</button></> : null}
-      <p className="auth-footnote">Kept is invite-only. Ask the owner to invite your email address.</p>
+      {mode === "sign-in" ? <p className="auth-footnote">New here? <button className="text-button" type="button" onClick={() => { setMode("sign-up"); setError(""); setMessage(""); }}>Create an account</button></p> : mode === "sign-up" ? <p className="auth-footnote">Create an account to keep your own private library.</p> : null}
     </section>
     <footer className="auth-footer"><span>kept.</span><span>A little more aware of what you own</span></footer>
   </main>;

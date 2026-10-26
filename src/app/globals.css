@@ -53,6 +53,31 @@ a { color: inherit; }
 .topbar-note { display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12px; letter-spacing: .01em; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--leaf-strong); box-shadow: 0 0 0 4px rgb(166 200 106 / 18%); }
 .top-actions { justify-self: end; display: flex; gap: 7px; }
+.profile-menu-wrap { position: relative; }
+.profile-trigger { min-height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 5px; border: 1px solid var(--rule); border-radius: 4px; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 12px; }
+.profile-trigger:hover, .profile-trigger[aria-expanded="true"] { background: var(--white); border-color: var(--rule-strong); }
+.profile-avatar { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 50%; background: var(--leaf); color: #31452b; }
+.profile-avatar svg { width: 20px; height: 20px; }
+.profile-popover { position: absolute; z-index: 15; top: calc(100% + 10px); right: 0; width: min(310px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--paper-deep); box-shadow: var(--shadow); }
+.profile-popover-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.profile-popover-heading .eyebrow { margin: 1px 0 5px; color: var(--leaf-strong); font-size: 9px; }
+.profile-popover-heading strong { font-size: 19px; font-weight: 570; letter-spacing: -.04em; }
+.profile-email { margin: 8px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.profile-prompt { margin: 17px 0 9px; color: var(--ink-soft); font-size: 12px; }
+.mascot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.mascot-option { min-height: 70px; display: grid; justify-items: center; align-content: center; gap: 4px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink-soft); cursor: pointer; text-transform: capitalize; transition: border-color 160ms var(--ease), transform 160ms var(--ease), background 160ms var(--ease); }
+.mascot-option:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--rule-strong); }
+.mascot-option.selected { border-color: var(--leaf-strong); box-shadow: inset 0 0 0 1px var(--leaf-strong); background: var(--white); }
+.mascot-option:disabled { cursor: wait; opacity: .65; }
+.mascot-option svg { width: 29px; height: 29px; }
+.mascot-option span { font-family: var(--font-mono); font-size: 9px; }
+.mascot-moth { background: #eee5dc; color: #78644c; }
+.mascot-cat { background: #e8dfe3; color: #76596a; }
+.mascot-moon { background: #e1e6ed; color: #536274; }
+.mascot-finch { background: #e7e5d8; color: #736e48; }
+.mascot-pebble { background: #e3e5df; color: #5c665b; }
+.profile-signout { width: 100%; min-height: 40px; margin-top: 13px; border: 1px solid var(--rule); border-radius: 4px; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 12px; }
+.profile-signout:hover { border-color: var(--rule-strong); background: var(--white); }
 .quiet-button, .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ink-soft); cursor: pointer; transition: background 180ms var(--ease), border-color 180ms var(--ease), transform 180ms var(--ease); }
 .quiet-button { padding: 9px 12px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .theme-button { border-color: var(--rule); background: rgb(251 252 248 / 42%); }
@@ -124,6 +149,7 @@ a { color: inherit; }
 .seal-accessories { background: #e9e1d4; color: #78634b; }
 .seal-tech { background: #dce8e9; color: #4d6a6d; }
 .seal-skincare { background: #e9dfe2; color: #7c5866; }
+.seal-health { background: #e2e8d9; color: #586d43; }
 .seal-home { background: #e9e7d9; color: #706b46; }
 .seal-vehicle { background: #dfe3e8; color: #556575; }
 .seal-other, .seal-unsorted { background: #e2e8dc; color: #4c6440; }
@@ -393,6 +419,9 @@ a { color: inherit; }
   .wordmark { gap: 8px; font-size: 16px; }
   .quiet-button { gap: 5px; padding-inline: 7px; }
   .quiet-button svg { width: 14px; }
+  .profile-trigger { min-height: 35px; padding: 2px; border-color: transparent; }
+  .profile-trigger-label { display: none; }
+  .profile-popover { right: -2px; }
   .intro { padding-top: 31px; }
   .intro h1 { font-size: clamp(40px, 10.5vw, 52px); }
   .desktop-break { display: none; }
@@ -448,6 +477,12 @@ a { color: inherit; }
 
 /* Night field ledger: deep green-black paper, raised moss panels, and quiet leaf light. */
 html[data-theme="dark"] .brand-mark { color: #17241e; }
+html[data-theme="dark"] .seal-health { background: #303a2b; color: #c9dda8; }
+html[data-theme="dark"] .mascot-moth { background: #3b342a; color: #dfc7a5; }
+html[data-theme="dark"] .mascot-cat { background: #3a3038; color: #e1becd; }
+html[data-theme="dark"] .mascot-moon { background: #303743; color: #c1cee2; }
+html[data-theme="dark"] .mascot-finch { background: #3c3a2b; color: #e0d99f; }
+html[data-theme="dark"] .mascot-pebble { background: #343a34; color: #c7d0c5; }
 html[data-theme="dark"] .theme-button { background: rgb(26 36 30 / 72%); }
 html[data-theme="dark"] .status-dot { box-shadow: 0 0 0 4px rgb(184 217 128 / 14%); }
 html[data-theme="dark"] .button-primary { background: #d6e8c1; color: #17241e; }

@@ -16,6 +16,12 @@ import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"];
 const THEME_STORAGE_KEY = "kept-theme-v1";
+const PROFILE_MASCOTS = ["sprout", "moth", "cat", "moon", "finch", "pebble"] as const;
+type ProfileMascot = typeof PROFILE_MASCOTS[number];
+
+function validMascot(value: unknown): value is ProfileMascot {
+  return typeof value === "string" && PROFILE_MASCOTS.includes(value as ProfileMascot);
+}
 
 function Icon({ name, size = 18 }: { name: "plus" | "search" | "download" | "upload" | "close" | "arrow" | "trash" | "spark" | "refresh" | "moon" | "sun"; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const };
@@ -62,6 +68,8 @@ export default function Home() {
   const [eventKind, setEventKind] = useState<EventKind>("purchase");
   const [notice, setNotice] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
   const [productFetch, setProductFetch] = useState<{ itemId: string; status: "loading" | "error"; message?: string } | null>(null);
   const [productRefreshToken, setProductRefreshToken] = useState(0);
   const [editingProductLinkId, setEditingProductLinkId] = useState<string | null>(null);
@@ -156,6 +164,9 @@ export default function Home() {
     media.addEventListener("change", followSystem);
     return () => media.removeEventListener("change", followSystem);
   }, []);
+
+  const savedMascot: unknown = user?.user_metadata?.kept_mascot;
+  const profileMascot: ProfileMascot = validMascot(savedMascot) ? savedMascot : "sprout";
 
   useEffect(() => {
     if (!ready) return;
@@ -523,6 +534,14 @@ export default function Home() {
     if (error) announce(error.message);
   }
 
+  async function saveProfileMascot(mascot: ProfileMascot) {
+    setProfileBusy(true);
+    const { data, error } = await createClient().auth.updateUser({ data: { kept_mascot: mascot } });
+    if (error) announce(`Could not save your profile picture: ${error.message}`);
+    else { if (data.user) setUser(data.user); announce("Profile picture saved."); }
+    setProfileBusy(false);
+  }
+
   async function importBackup(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -599,7 +618,22 @@ export default function Home() {
             <Icon name="download" size={16} /><span>Back up</span>
           </button>
           <button className="quiet-button restore-button" onClick={() => importInput.current?.click()}><Icon name="upload" size={16} /><span>Restore</span></button>
-          {user ? <button className="quiet-button sign-out-button" onClick={signOut} title={`Sign out ${user.email ?? ""}`}><span>Sign out</span></button> : null}
+          {user ? <div className="profile-menu-wrap">
+            <button className="profile-trigger" onClick={() => setProfileOpen((open) => !open)} aria-expanded={profileOpen} aria-haspopup="dialog" aria-label="Open profile settings">
+              <span className={`profile-avatar mascot-${profileMascot}`}><MascotMark name={profileMascot} /></span><span className="profile-trigger-label">Profile</span>
+            </button>
+            {profileOpen ? <section className="profile-popover" role="dialog" aria-label="Profile settings">
+              <div className="profile-popover-heading"><div><p className="eyebrow">YOUR ACCOUNT</p><strong>Profile picture</strong></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile settings"><Icon name="close" size={16} /></button></div>
+              <p className="profile-email">{user.email}</p>
+              <p className="profile-prompt">Choose a little mascot for your account.</p>
+              <div className="mascot-grid" aria-label="Profile picture options">
+                {PROFILE_MASCOTS.map((mascot) => <button key={mascot} type="button" className={`mascot-option mascot-${mascot}${profileMascot === mascot ? " selected" : ""}`} onClick={() => saveProfileMascot(mascot)} disabled={profileBusy} aria-pressed={profileMascot === mascot} aria-label={`${mascot} profile picture`} title={mascot}>
+                  <MascotMark name={mascot} /><span>{mascot}</span>
+                </button>)}
+              </div>
+              <button className="profile-signout" onClick={signOut}>Sign out</button>
+            </section> : null}
+          </div> : null}
           <input ref={importInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={importBackup} aria-label="Choose a Kept backup file" />
         </div>
       </header>
@@ -738,4 +772,17 @@ export default function Home() {
       <div className="toast" role="status" aria-live="polite" data-visible={Boolean(notice)}>{notice}</div>
     </main>
   );
+}
+
+function MascotMark({ name }: { name: ProfileMascot }) {
+  const base = { viewBox: "0 0 40 40", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const };
+  const drawings: Record<ProfileMascot, React.ReactNode> = {
+    sprout: <><path d="M20 31V19" /><path d="M20 23c-7 0-11-4-11-10 7 0 11 4 11 10Z" /><path d="M20 19c0-7 4-11 11-11 0 7-4 11-11 11Z" /><path d="M14 32h12" /></>,
+    moth: <><path d="M20 17c-3-8-12-10-13-3-1 5 4 9 11 9-6 1-8 6-4 8 4 1 7-3 8-8" /><path d="M20 17c3-8 12-10 13-3 1 5-4 9-11 9 6 1 8 6 4 8-4 1-7-3-8-8" /><path d="M18 13l-3-4m7 4 3-4" /></>,
+    cat: <><path d="m10 17 2-9 8 6 8-6 2 9v9c0 5-4 8-10 8s-10-3-10-8v-9Z" /><path d="M15 22h.1m9.8 0h.1M17 28c2 2 4 2 6 0" /><path d="m12 25-5 1m6 2-5 3m20-6 5 1m-6 2 5 3" /></>,
+    moon: <><path d="M27 28c-9 0-15-7-13-16 1-3 2-5 4-7C10 7 5 14 6 22c1 9 9 15 18 13 5-1 9-5 11-10-2 2-5 3-8 3Z" /><path d="m27 9 .8 2.2L30 12l-2.2.8L27 15l-.8-2.2L24 12l2.2-.8L27 9Z" /></>,
+    finch: <><path d="M8 26c0-9 5-16 13-16 7 0 11 6 11 13v8H8v-5Z" /><path d="m22 18 10 4-10 4" /><circle cx="19" cy="19" r="1" fill="currentColor" stroke="none" /><path d="M12 31v3m14-3v3" /></>,
+    pebble: <><path d="M7 26c0-8 5-15 13-17 8-1 14 6 14 14 0 7-6 11-14 11S7 32 7 26Z" /><path d="M13 22c2-2 4-2 6 0m3 0c2-2 4-2 6 0M17 28c2 1 4 1 6 0" /></>,
+  };
+  return <svg {...base}>{drawings[name]}</svg>;
 }

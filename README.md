@@ -9,7 +9,7 @@ Kept is a personal tracker for the things you own, buy again, use, and maintain.
 - Record purchase quantity and actual total paid, including discounts and bundles.
 - Save product variants with separate listed prices.
 - Add your own product photo or let Kept read public product page details when a shop allows it.
-- Use email/password or Google sign-in with invited accounts. Records sync through Supabase and can also be edited in its Table Editor.
+- Create an account with email/password or sign in with Google. Records sync through Supabase and can also be edited in its Table Editor.
 - Export and restore a JSON backup. Kept asks before copying old browser records into a signed-in account.
 - Switch between light and dark themes.
 
@@ -30,8 +30,8 @@ Without Supabase environment values, Kept remains in local-browser mode. Follow 
 1. Create a Supabase project. The free plan is enough to get started; check its current limits and inactivity behavior on [Supabase pricing](https://supabase.com/pricing).
 2. In the Supabase SQL Editor, run [`supabase/migrations/20261026000100_tracker.sql`](./supabase/migrations/20261026000100_tracker.sql). This creates the item, variant, and event tables, row-level security, and a private product-photo bucket.
 3. In **Authentication → Sign In / Providers**, keep email/password enabled and enable Google after adding your Google OAuth client ID and secret. Add the Supabase callback URL shown on that provider page to the Google OAuth client.
-4. In **Authentication → Settings**, disable public sign-ups. Add `http://localhost:3000/**` and your deployed Vercel domain with `/**` to the allowed redirect URLs. Set the site URL to your deployed Vercel address.
-5. Invite your email from **Authentication → Users → Invite user**. Use the invitation link to open the app and sign in. Kept does not provide a public account-creation form.
+4. In **Authentication → Settings**, enable public sign-ups. Add `http://localhost:3000/**` and your deployed Vercel domain with `/**` to the allowed redirect URLs. Set the site URL to your deployed Vercel address. Email confirmation may be enabled; new users will need to confirm their email before signing in.
+5. New users can create their own accounts from Kept’s sign-in screen. With email confirmation enabled, they must confirm their address before signing in. Google sign-in is available once its provider is configured.
 6. Copy the project URL and publishable key from **Project Settings → API** into `.env.local`:
 
    ```env
