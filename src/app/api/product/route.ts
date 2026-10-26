@@ -5,7 +5,7 @@ import { retailerForHost } from "@/lib/retailers";
 export const runtime = "nodejs";
 
 const MAX_HTML_BYTES = 2_000_000;
-const FETCH_TIMEOUT_MS = 8_000;
+const FETCH_TIMEOUT_MS = 12_000;
 const MAX_REDIRECTS = 3;
 
 function isPublicAddress(address: string) {
@@ -201,7 +201,18 @@ async function fetchProductPage(initialUrl: URL) {
         redirect: "manual",
         cache: "no-store",
         signal: controller.signal,
-        headers: { accept: "text/html,application/xhtml+xml;q=0.9", "user-agent": "KeptProductPreview/1.0" },
+        // Many stores reject requests that identify themselves as a custom scraper.
+        // A normal browser request helps on stores that allow server-side previews;
+        // it cannot bypass stores that require a session, app, or bot challenge.
+        headers: {
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "accept-language": "en-IN,en;q=0.9",
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-dest": "document",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "none",
+          "upgrade-insecure-requests": "1",
+        },
       });
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
