@@ -32,10 +32,26 @@ export type TrackedItem = {
     amount?: number;
     currency?: string;
     fetchedAt?: string;
+    priceFetchedAt?: string;
+    source?: "flipkart-api" | "product-page";
+    productId?: string;
+    variant?: string;
+    mrp?: number;
+    availability?: string;
   };
+  priceHistory?: ProductPriceObservation[];
   variants?: ProductVariant[];
   createdAt: string;
   events: ItemEvent[];
+};
+
+export type ProductPriceObservation = {
+  id: string;
+  amount: number;
+  currency: string;
+  observedAt: string;
+  source?: "flipkart-api" | "product-page" | "manual";
+  variant?: string;
 };
 
 export type ProductVariant = {
@@ -116,8 +132,22 @@ export function validItems(value: unknown): value is TrackedItem[] {
       (item.currentProduct.imageUrl === undefined || (typeof item.currentProduct.imageUrl === "string" && item.currentProduct.imageUrl.length <= 2048 && isSafeHttpsUrl(item.currentProduct.imageUrl))) &&
       (item.currentProduct.amount === undefined || (typeof item.currentProduct.amount === "number" && Number.isFinite(item.currentProduct.amount))) &&
       (item.currentProduct.currency === undefined || (typeof item.currentProduct.currency === "string" && /^[A-Z]{3}$/.test(item.currentProduct.currency))) &&
-      (item.currentProduct.fetchedAt === undefined || typeof item.currentProduct.fetchedAt === "string")
+      (item.currentProduct.fetchedAt === undefined || typeof item.currentProduct.fetchedAt === "string") &&
+      (item.currentProduct.priceFetchedAt === undefined || typeof item.currentProduct.priceFetchedAt === "string") &&
+      (item.currentProduct.source === undefined || ["flipkart-api", "product-page"].includes(item.currentProduct.source)) &&
+      (item.currentProduct.productId === undefined || (typeof item.currentProduct.productId === "string" && item.currentProduct.productId.length <= 120)) &&
+      (item.currentProduct.variant === undefined || (typeof item.currentProduct.variant === "string" && item.currentProduct.variant.length <= 240)) &&
+      (item.currentProduct.mrp === undefined || (typeof item.currentProduct.mrp === "number" && Number.isFinite(item.currentProduct.mrp) && item.currentProduct.mrp >= 0)) &&
+      (item.currentProduct.availability === undefined || (typeof item.currentProduct.availability === "string" && item.currentProduct.availability.length <= 64))
     )) &&
+    (item.priceHistory === undefined || (Array.isArray(item.priceHistory) && item.priceHistory.length <= 5000 && item.priceHistory.every((entry: unknown) => {
+      if (!entry || typeof entry !== "object") return false;
+      const candidate = entry as Record<string, unknown>;
+      return typeof candidate.id === "string" && typeof candidate.amount === "number" && Number.isFinite(candidate.amount) && candidate.amount >= 0 &&
+        typeof candidate.currency === "string" && /^[A-Z]{3}$/.test(candidate.currency) && typeof candidate.observedAt === "string" &&
+        (candidate.source === undefined || ["flipkart-api", "product-page", "manual"].includes(String(candidate.source))) &&
+        (candidate.variant === undefined || (typeof candidate.variant === "string" && candidate.variant.length <= 240));
+    }))) &&
     (item.variants === undefined || (Array.isArray(item.variants) && item.variants.every((variant: unknown) => {
       if (!variant || typeof variant !== "object") return false;
       const candidate = variant as Record<string, unknown>;

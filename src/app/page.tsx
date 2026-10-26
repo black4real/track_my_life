@@ -6,7 +6,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ageLabel, BackupFile, CATEGORIES, detailFields, EventKind, formatDate, formatMoney, ITEM_TYPES,
+  ageLabel, BackupFile, CATEGORIES, detailFields, EventKind, formatDate, formatMoney, ITEM_TYPES, ProductPriceObservation,
   lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
@@ -20,7 +20,21 @@ const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"];
 const THEME_STORAGE_KEY = "kept-theme-v1";
 const PROFILE_MASCOTS = ["sprout", "moth", "cat", "moon", "finch", "pebble"] as const;
 type ProfileMascot = typeof PROFILE_MASCOTS[number];
-type AddProductPreview = { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; storeName?: string };
+type ProductLookup = { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; storeName?: string; source?: "flipkart-api" | "product-page"; productId?: string; variant?: string; mrp?: number; availability?: string };
+type AddProductPreview = ProductLookup;
+
+function addPriceObservation(history: ProductPriceObservation[] | undefined, result: ProductLookup) {
+  if (result.amount === undefined || !result.fetchedAt) return history ?? [];
+  const currency = result.currency || "INR";
+  const observedDate = result.fetchedAt.slice(0, 10);
+  const sameDay = (history ?? []).find((entry) => entry.observedAt.slice(0, 10) === observedDate && entry.currency === currency && entry.variant === result.variant);
+  if (sameDay?.amount === result.amount) return history ?? [];
+  const observation: ProductPriceObservation = {
+    id: makeId(), amount: result.amount, currency, observedAt: result.fetchedAt,
+    source: result.source ?? "product-page", variant: result.variant,
+  };
+  return [...(history ?? []), observation].slice(-5000);
+}
 
 function validMascot(value: unknown): value is ProfileMascot {
   return typeof value === "string" && PROFILE_MASCOTS.includes(value as ProfileMascot);
@@ -79,6 +93,7 @@ export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [deliveryPin, setDeliveryPin] = useState("");
   const [addName, setAddName] = useState("");
   const [addCategory, setAddCategory] = useState("");
   const [addItemType, setAddItemType] = useState("");
@@ -239,10 +254,10 @@ export default function Home() {
       cache: "no-store",
       signal: controller.signal,
     }).then(async (response) => {
-      const result = await response.json() as { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; storeName?: string; error?: string };
+      const result = await response.json() as ProductLookup & { error?: string };
       if (!response.ok) throw new Error(result.error || "Could not read that product page.");
       setItems((current) => current.map((item) => item.id === itemId && item.productUrl === productUrl
-        ? { ...item, storeName: item.storeName || result.storeName, currentProduct: { title: result.title, imageUrl: result.imageUrl, amount: result.amount, currency: result.currency, fetchedAt: result.fetchedAt } }
+        ? { ...item, storeName: item.storeName || result.storeName, currentProduct: { title: result.title || item.currentProduct?.title, imageUrl: result.imageUrl || item.currentProduct?.imageUrl, amount: result.amount ?? item.currentProduct?.amount, currency: result.currency || item.currentProduct?.currency, fetchedAt: result.fetchedAt, priceFetchedAt: result.amount !== undefined ? result.fetchedAt : item.currentProduct?.priceFetchedAt, source: result.source, productId: result.productId, variant: result.variant, mrp: result.mrp, availability: result.availability }, priceHistory: addPriceObservation(item.priceHistory, result) }
         : item));
       setProductFetch(null);
     }).catch((error: unknown) => {
@@ -378,7 +393,8 @@ export default function Home() {
       specifications: Object.keys(specifications).length ? specifications : undefined,
       note: note || undefined, productUrl: productUrl || undefined,
       storeName: addStoreName.trim() || detectRetailer(productUrl)?.name || undefined,
-      currentProduct: addPreview ? { title: addName.trim() || addPreview.title || name, imageUrl: addImageUrl || undefined, amount: addPreview.amount, currency: addPreview.currency, fetchedAt: addPreview.fetchedAt } : (addImageUrl || listedAmount !== undefined ? { title: addName.trim() || name, imageUrl: addImageUrl || undefined } : undefined),
+      currentProduct: addPreview ? { title: addPreview.title || addName.trim() || name, imageUrl: addImageUrl || undefined, amount: addPreview.amount, currency: addPreview.currency, fetchedAt: addPreview.fetchedAt, priceFetchedAt: addPreview.amount !== undefined ? addPreview.fetchedAt : undefined, source: addPreview.source, productId: addPreview.productId, variant: addPreview.variant, mrp: addPreview.mrp, availability: addPreview.availability } : (addImageUrl || listedAmount !== undefined ? { title: addName.trim() || name, imageUrl: addImageUrl || undefined } : undefined),
+      priceHistory: addPreview?.amount !== undefined ? addPriceObservation([], addPreview) : undefined,
       listedPriceOverride: addPriceEdited && listedAmount !== undefined ? { amount: listedAmount, currency: addListedCurrency } : undefined,
       createdAt: now,
       events: date || amount !== undefined || Object.values(purchaseAttributes).some(Boolean) ? [{ id: makeId(), kind: "purchase", date: date || undefined, amount, currency: amount !== undefined ? currency : undefined, attributes: Object.keys(purchaseAttributes).length ? purchaseAttributes : undefined, createdAt: now }] : [],
@@ -490,7 +506,7 @@ export default function Home() {
       }
     }
     setItems((current) => current.map((item) => item.id === selectedItem.id
-      ? { ...item, productUrl: value || undefined, storeName: value ? detectRetailer(value)?.name || (() => { try { return new URL(value).hostname.replace(/^www\./i, ""); } catch { return undefined; } })() : undefined, currentProduct: value === item.productUrl ? item.currentProduct : undefined }
+      ? { ...item, productUrl: value || undefined, storeName: value ? detectRetailer(value)?.name || (() => { try { return new URL(value).hostname.replace(/^www\./i, ""); } catch { return undefined; } })() : undefined, currentProduct: value === item.productUrl ? item.currentProduct : undefined, priceHistory: value === item.productUrl ? item.priceHistory : [], listedPriceOverride: value === item.productUrl ? item.listedPriceOverride : undefined }
       : item));
     setProductLinkError("");
     setEditingProductLinkId(null);
@@ -647,6 +663,24 @@ export default function Home() {
     setProfileBusy(false);
   }
 
+  async function saveDeliveryPin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const postalCode = deliveryPin.trim();
+    if (postalCode && !/^\d{6}$/.test(postalCode)) {
+      announce("Enter a 6-digit Indian PIN code, or leave it blank.");
+      return;
+    }
+    if (!user) return;
+    setProfileBusy(true);
+    const { data, error } = await createClient().auth.updateUser({ data: { kept_delivery_pin: postalCode || null } });
+    if (error) announce(`Could not save your delivery PIN: ${error.message}`);
+    else {
+      if (data.user) setUser(data.user);
+      announce(postalCode ? "Delivery PIN saved." : "Delivery PIN removed.");
+    }
+    setProfileBusy(false);
+  }
+
   async function importBackup(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -757,7 +791,7 @@ export default function Home() {
           </button>
           <button className="quiet-button restore-button" onClick={() => importInput.current?.click()}><Icon name="upload" size={16} /><span>Restore</span></button>
           {user ? <div className="profile-menu-wrap">
-            <button className="profile-trigger" onClick={() => setProfileOpen((open) => !open)} aria-expanded={profileOpen} aria-haspopup="dialog" aria-label="Open profile settings">
+            <button className="profile-trigger" onClick={() => { setDeliveryPin(String(user.user_metadata?.kept_delivery_pin ?? "")); setProfileOpen((open) => !open); }} aria-expanded={profileOpen} aria-haspopup="dialog" aria-label="Open profile settings">
               <span className={`profile-avatar mascot-${profileMascot}`}><MascotMark name={profileMascot} /></span><span className="profile-trigger-label">Profile</span>
             </button>
             {profileOpen ? <section className="profile-popover" role="dialog" aria-label="Profile settings">
@@ -769,6 +803,11 @@ export default function Home() {
                   <MascotMark name={mascot} /><span>{mascot}</span>
                 </button>)}
               </div>
+              <form className="delivery-pin-form" onSubmit={saveDeliveryPin}>
+                <label className="field"><span>Delivery PIN <b>OPTIONAL</b></span><input inputMode="numeric" autoComplete="postal-code" pattern="[0-9]{6}" maxLength={6} value={deliveryPin} onChange={(event) => setDeliveryPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit PIN code" aria-describedby="delivery-pin-help" /></label>
+                <small id="delivery-pin-help">Saved to your account. Current product lookups do not share it with shops.</small>
+                <button className="profile-signout delivery-pin-save" type="submit" disabled={profileBusy}>Save delivery PIN</button>
+              </form>
               <button className="profile-signout" onClick={signOut}>Sign out</button>
             </section> : null}
           </div> : null}
@@ -850,8 +889,12 @@ export default function Home() {
               {(selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl) ? <img className="product-image" src={selectedItem.productPhoto || selectedItem.currentProduct?.imageUrl} alt={selectedItem.currentProduct?.title || selectedItem.name} referrerPolicy="no-referrer" /> : <div className="product-image-placeholder" aria-hidden="true">{selectedItem.name.trim().charAt(0).toUpperCase()}</div>}
               <div className="product-card-content">
                 <strong className="product-title">{selectedItem.currentProduct?.title || (selectedItem.productUrl ? "Product listing" : "Add a product link")}</strong>
-                {selectedItem.listedPriceOverride ? <div className="product-price">{formatMoney(selectedItem.listedPriceOverride.amount, selectedItem.listedPriceOverride.currency)} <span>your listed price</span></div> : selectedItem.currentProduct?.amount !== undefined ? <div className="product-price">{selectedItem.currentProduct.currency ? formatMoney(selectedItem.currentProduct.amount, selectedItem.currentProduct.currency) : selectedItem.currentProduct.amount.toLocaleString()} <span>shop price</span></div> : selectedItem.productUrl ? <p className="product-price product-no-price">Price not available</p> : null}
-                {selectedItem.currentProduct?.fetchedAt ? <span className="product-checked">Updated {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedItem.currentProduct.fetchedAt))}</span> : null}
+                {selectedItem.listedPriceOverride ? <div className="product-price">{formatMoney(selectedItem.listedPriceOverride.amount, selectedItem.listedPriceOverride.currency)} <span>your listed price</span></div> : selectedItem.currentProduct?.amount !== undefined ? <div className="product-price">{selectedItem.currentProduct.currency ? formatMoney(selectedItem.currentProduct.amount, selectedItem.currentProduct.currency) : selectedItem.currentProduct.amount.toLocaleString()} <span>{selectedItem.currentProduct.priceFetchedAt && selectedItem.currentProduct.fetchedAt && selectedItem.currentProduct.priceFetchedAt !== selectedItem.currentProduct.fetchedAt ? "last known shop price" : "shop price"}</span></div> : selectedItem.productUrl ? <p className="product-price product-no-price">Price not available</p> : null}
+                {selectedItem.currentProduct?.mrp !== undefined ? <span className="product-checked">MRP {formatMoney(selectedItem.currentProduct.mrp, selectedItem.currentProduct.currency)}</span> : null}
+                {selectedItem.currentProduct?.variant ? <span className="product-checked">Listing option: {selectedItem.currentProduct.variant}</span> : null}
+                {selectedItem.currentProduct?.availability === "OutOfStock" || selectedItem.currentProduct?.availability === "SoldOut" ? <span className="product-checked">Currently out of stock</span> : null}
+                {selectedItem.currentProduct?.fetchedAt ? <span className="product-checked">Details checked {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedItem.currentProduct.fetchedAt))}</span> : null}
+                {selectedItem.currentProduct?.priceFetchedAt ? <span className="product-checked">Price checked {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(selectedItem.currentProduct.priceFetchedAt))}</span> : null}
               </div>
               {selectedItem.productUrl ? <a className="product-link" href={selectedItem.productUrl} target="_blank" rel="noreferrer noopener">Open shop page <Icon name="arrow" size={15} /></a> : null}
               {productFetch?.itemId === selectedItem.id && productFetch.status === "loading" ? <p className="product-status" aria-live="polite">Checking shop…</p> : null}
@@ -882,6 +925,10 @@ export default function Home() {
                 <div className="product-form-actions"><button className="button button-primary" onClick={saveProductPhoto}>Crop & save</button><button className="text-button" onClick={() => { setPhotoDraftFile(null); setPhotoDraftUrl(""); setPhotoDraftItemId(null); }}>Cancel</button></div>
               </div> : null}
               {selectedItem.productUrl ? <p className="product-help">Some shops block automatic price reads. You can add a photo and price yourself.</p> : null}
+              {selectedItem.priceHistory?.length ? <section className="price-history" aria-label="Observed shop price history">
+                <div className="price-history-heading"><span>PRICE HISTORY</span><span>{selectedItem.priceHistory.length} price points</span></div>
+                <ol>{[...selectedItem.priceHistory].sort((a, b) => b.observedAt.localeCompare(a.observedAt)).slice(0, 6).map((observation) => <li key={observation.id}><time dateTime={observation.observedAt}>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(observation.observedAt))}</time><strong>{formatMoney(observation.amount, observation.currency)}</strong></li>)}</ol>
+              </section> : null}
             </section>
             {(selectedItem.variants?.length || selectedItem.productUrl) ? <section className="variants-panel" aria-label="Product variants">
               <div className="variants-heading"><div><p className="eyebrow">OPTIONS</p><h4>Sizes & options</h4></div><button className="button button-outline" onClick={() => openVariant()}><Icon name="plus" size={15} /> Add option</button></div>

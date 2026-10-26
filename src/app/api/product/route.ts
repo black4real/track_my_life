@@ -135,6 +135,16 @@ function positivePrice(value: unknown) {
   return Number.isFinite(price) && price >= 0 && price <= 1_000_000_000 ? price : undefined;
 }
 
+function sameProductPage(candidate: unknown, sourceUrl: URL) {
+  if (typeof candidate !== "string") return false;
+  try {
+    const url = new URL(candidate, sourceUrl);
+    const candidatePid = url.searchParams.get("pid") ?? url.searchParams.get("sku");
+    const sourcePid = sourceUrl.searchParams.get("pid") ?? sourceUrl.searchParams.get("sku");
+    return url.hostname === sourceUrl.hostname && url.pathname === sourceUrl.pathname && (!candidatePid || !sourcePid || candidatePid === sourcePid);
+  } catch { return false; }
+}
+
 function productData(html: string, sourceUrl: URL) {
   const meta = metaValues(html);
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
@@ -147,13 +157,22 @@ function productData(html: string, sourceUrl: URL) {
   });
   const product = structured[0];
   const offersValue = product?.offers;
-  const offer = offerNodes(offersValue).sort((left, right) => (positivePrice(left.price ?? left.lowPrice) ?? Infinity) - (positivePrice(right.price ?? right.lowPrice) ?? Infinity))[0];
+  const offers = offerNodes(offersValue);
+  const exactOffer = offers.find((candidate) => {
+    const offered = candidate.itemOffered && typeof candidate.itemOffered === "object" ? candidate.itemOffered as Record<string, unknown> : undefined;
+    return sameProductPage(candidate.url ?? offered?.url, sourceUrl);
+  });
+  const uniqueOfferPrices = [...new Set(offers.map((candidate) => positivePrice(candidate.price)).filter((price): price is number => price !== undefined))];
+  const offer = exactOffer ?? (uniqueOfferPrices.length <= 1 ? offers.find((candidate) => positivePrice(candidate.price) !== undefined) : undefined);
   const specificationValue = offer?.priceSpecification;
   const specification = Array.isArray(specificationValue) ? specificationValue.find((entry) => entry && typeof entry === "object") as Record<string, unknown> | undefined : specificationValue && typeof specificationValue === "object" ? specificationValue as Record<string, unknown> : undefined;
   const image = firstImageURL(product?.image);
   const htmlTitle = html.match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i)?.[1].replace(/<[^>]+>/g, "").trim();
   const title = firstText(product?.name) ?? meta.get("og:title") ?? meta.get("twitter:title") ?? (htmlTitle ? decodeEntities(htmlTitle) : undefined);
-  const amount = positivePrice(offer?.price ?? offer?.lowPrice ?? specification?.price ?? meta.get("product:price:amount") ?? meta.get("og:price:amount") ?? meta.get("price"));
+  const availabilityValue = typeof offer?.availability === "string" ? offer.availability.split(/[\/#]/).filter(Boolean).at(-1) : undefined;
+  const availability = availabilityValue && /^[a-z]+$/i.test(availabilityValue) ? availabilityValue : undefined;
+  const isUnavailable = availability === "OutOfStock" || availability === "SoldOut" || availability === "Discontinued";
+  const amount = isUnavailable ? undefined : positivePrice(offer?.price ?? specification?.price ?? (uniqueOfferPrices.length <= 1 ? meta.get("product:price:amount") ?? meta.get("og:price:amount") ?? meta.get("price") : undefined));
   const currencyValue = offer?.priceCurrency ?? specification?.priceCurrency ?? meta.get("product:price:currency") ?? meta.get("og:price:currency");
   const currency = typeof currencyValue === "string" && /^[A-Z]{3}$/i.test(currencyValue) ? currencyValue.toUpperCase() : undefined;
   const rawImage = meta.get("og:image:secure_url") ?? image ?? meta.get("og:image") ?? meta.get("twitter:image");
@@ -164,7 +183,71 @@ function productData(html: string, sourceUrl: URL) {
       if (candidate.protocol === "https:" && !candidate.username && !candidate.password) imageUrl = candidate.toString();
     } catch { /* Some product pages publish malformed image fields. */ }
   }
-  return { title: title?.slice(0, 240), imageUrl, amount, currency };
+  const sku = firstText(product?.sku ?? product?.productID ?? product?.mpn);
+  const variantParts: string[] = [];
+  const color = firstText(product?.color);
+  const size = firstText(product?.size);
+  if (color) variantParts.push(`Color: ${color}`);
+  if (size) variantParts.push(`Size: ${size}`);
+  return { title: title?.slice(0, 240), imageUrl, amount, currency, availability, productId: sku?.slice(0, 120), variant: variantParts.length ? variantParts.join(" · ").slice(0, 240) : undefined };
+}
+
+function flipkartData(value: unknown) {
+  if (!value || typeof value !== "object") return undefined;
+  const root = value as Record<string, unknown>;
+  const base = (root.productBaseInfoV1 ?? root.productBaseInfo) as Record<string, unknown> | undefined;
+  if (!base) return undefined;
+  const attributes = (base.productAttributes ?? base.attributes ?? base) as Record<string, unknown>;
+  const sellingPrice = (attributes.flipkartSpecialPrice ?? attributes.sellingPrice ?? attributes.flipkartSellingPrice ?? base.flipkartSpecialPrice ?? base.sellingPrice ?? base.flipkartSellingPrice) as Record<string, unknown> | undefined;
+  const mrp = (attributes.maximumRetailPrice ?? base.maximumRetailPrice) as Record<string, unknown> | undefined;
+  const imageUrls = (attributes.imageUrls ?? base.imageUrls) as Record<string, unknown> | undefined;
+  const rawImageUrl = imageUrls && (["1100x1360", "800x800", "400x400", "275x340", "275x275", "200x200", "unknown"]
+    .map((size) => imageUrls[size]).find((entry) => typeof entry === "string" && /^https?:\/\//i.test(entry))
+    ?? Object.values(imageUrls).find((entry) => typeof entry === "string" && /^https?:\/\//i.test(entry)));
+  let imageUrl: string | undefined;
+  if (typeof rawImageUrl === "string") {
+    try { const parsed = new URL(rawImageUrl); parsed.protocol = "https:"; imageUrl = parsed.toString(); } catch { /* Ignore malformed retailer image URLs. */ }
+  }
+  const title = firstText(attributes.title ?? base.title);
+  const productId = firstText(base.productId ?? (base.productIdentifier as Record<string, unknown> | undefined)?.productId);
+  const size = firstText(attributes.size ?? base.size);
+  const color = firstText(attributes.color ?? base.color);
+  const variantParts = [color ? `Color: ${color}` : "", size ? `Size: ${size}` : ""].filter(Boolean);
+  const amount = positivePrice(sellingPrice?.amount);
+  const currency = firstText(sellingPrice?.currency) ?? firstText((mrp as Record<string, unknown> | undefined)?.currency);
+  const maximumRetailPrice = positivePrice(mrp?.amount);
+  if (!title) return undefined;
+  return {
+    title: title.slice(0, 240),
+    imageUrl: typeof imageUrl === "string" ? imageUrl : undefined,
+    amount,
+    currency: currency && /^[A-Z]{3}$/i.test(currency) ? currency.toUpperCase() : undefined,
+    productId: productId?.slice(0, 120),
+    variant: variantParts.length ? variantParts.join(" · ").slice(0, 240) : undefined,
+    mrp: maximumRetailPrice,
+    source: "flipkart-api" as const,
+  };
+}
+
+async function fetchFlipkartProduct(productId: string) {
+  const affiliateId = process.env.FLIPKART_AFFILIATE_ID;
+  const affiliateToken = process.env.FLIPKART_AFFILIATE_TOKEN;
+  if (!affiliateId || !affiliateToken) return undefined;
+  const apiUrl = new URL("https://affiliate-api.flipkart.net/affiliate/1.0/product.json");
+  apiUrl.searchParams.set("id", productId);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(apiUrl, {
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { "Fk-Affiliate-Id": affiliateId, "Fk-Affiliate-Token": affiliateToken, accept: "application/json" },
+    });
+    if (!response.ok) return undefined;
+    const data: unknown = await response.json();
+    return flipkartData(data);
+  } catch { return undefined; }
+  finally { clearTimeout(timeout); }
 }
 
 async function readLimitedBody(response: Response) {
@@ -242,9 +325,14 @@ export async function POST(request: Request) {
   if (typeof rawUrl !== "string" || rawUrl.length > 2048) return Response.json({ error: "Add a valid product link." }, { status: 400 });
   try {
     const initialUrl = await validatePublicHttpsURL(rawUrl);
-    const result = await fetchProductPage(initialUrl);
-    const retailer = retailerForHost(initialUrl.hostname) ?? retailerForHost(new URL(result.sourceUrl).hostname);
-    return Response.json({ ...result.data, storeName: retailer?.name, sourceUrl: result.sourceUrl, fetchedAt: new Date().toISOString() }, {
+    const retailer = retailerForHost(initialUrl.hostname);
+    const flipkartId = retailer?.name === "Flipkart" ? initialUrl.searchParams.get("pid") : null;
+    const officialProduct = flipkartId ? await fetchFlipkartProduct(flipkartId) : undefined;
+    const result = officialProduct
+      ? { data: officialProduct, sourceUrl: initialUrl.toString() }
+      : await fetchProductPage(initialUrl);
+    const resolvedRetailer = retailer ?? retailerForHost(new URL(result.sourceUrl).hostname);
+    return Response.json({ ...result.data, source: officialProduct ? "flipkart-api" : "product-page", storeName: resolvedRetailer?.name, sourceUrl: result.sourceUrl, fetchedAt: new Date().toISOString() }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ItemEvent, TrackedItem } from "@/lib/tracker";
+import type { ItemEvent, ProductPriceObservation, TrackedItem } from "@/lib/tracker";
 
 const PHOTO_BUCKET = "product-photos";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -12,20 +12,24 @@ type ItemRow = {
 };
 type EventRow = { id: string; kind: ItemEvent["kind"]; date: string | null; amount: number | null; currency: string | null; quantity: number | null; variant: string | null; note: string | null; feeling: ItemEvent["feeling"] | null; attributes: ItemEvent["attributes"] | null; item_id: string; user_id: string; created_at: string };
 type VariantRow = { id: string; name: string; amount: number | null; currency: string | null; item_id: string; user_id: string };
+type PriceObservationRow = { id: string; amount: number; currency: string; source: ProductPriceObservation["source"]; variant: string | null; observed_at: string; item_id: string; user_id: string };
 
 export async function loadTrackerItems(client: SupabaseClient, userId: string): Promise<TrackedItem[]> {
-  const [itemsResult, eventsResult, variantsResult] = await Promise.all([
+  const [itemsResult, eventsResult, variantsResult, observationsResult] = await Promise.all([
     client.from("items").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
     client.from("events").select("*").eq("user_id", userId),
     client.from("variants").select("*").eq("user_id", userId),
+    client.from("product_price_observations").select("*").eq("user_id", userId).order("observed_at", { ascending: false }),
   ]);
   if (itemsResult.error) throw itemsResult.error;
   if (eventsResult.error) throw eventsResult.error;
   if (variantsResult.error) throw variantsResult.error;
+  if (observationsResult.error) throw observationsResult.error;
 
   const rows = (itemsResult.data ?? []) as ItemRow[];
   const events = (eventsResult.data ?? []) as EventRow[];
   const variants = (variantsResult.data ?? []) as VariantRow[];
+  const observations = (observationsResult.data ?? []) as PriceObservationRow[];
   return Promise.all(rows.map(async (row) => {
     let productPhoto: string | undefined;
     if (row.product_photo_path) {
@@ -37,6 +41,10 @@ export async function loadTrackerItems(client: SupabaseClient, userId: string): 
       specifications: row.specifications ?? undefined, note: row.note ?? undefined,
       productUrl: row.product_url ?? undefined, storeName: row.store_name ?? undefined, productPhoto, productPhotoPath: row.product_photo_path ?? undefined,
       listedPriceOverride: row.listed_price_override ?? undefined, currentProduct: row.current_product ?? undefined,
+      priceHistory: observations.filter((entry) => entry.item_id === row.id).map((entry) => ({
+        id: entry.id, amount: Number(entry.amount), currency: entry.currency, source: entry.source,
+        variant: entry.variant ?? undefined, observedAt: entry.observed_at,
+      })),
       createdAt: row.created_at,
       events: events.filter((entry) => entry.item_id === row.id).map((entry) => ({
         id: entry.id, kind: entry.kind, date: entry.date ?? undefined, amount: entry.amount ?? undefined, currency: entry.currency ?? undefined,
@@ -116,6 +124,16 @@ export async function syncTrackerItems(client: SupabaseClient, userId: string, p
       const { error } = await client.from("events").delete().eq("item_id", item.id).in("id", removeEventIds);
       if (error) throw error;
     }
+
+    const oldPriceIds = new Set((old?.priceHistory ?? []).map((entry) => entry.id));
+    const newPrices = (item.priceHistory ?? []).filter((entry) => !oldPriceIds.has(entry.id));
+    if (newPrices.length) {
+      const { error } = await client.from("product_price_observations").upsert(newPrices.map((entry) => ({
+        id: entry.id, item_id: item.id, user_id: userId, amount: entry.amount, currency: entry.currency,
+        source: entry.source ?? "product-page", variant: entry.variant ?? null, observed_at: entry.observedAt,
+      })));
+      if (error) throw error;
+    }
     normalized.set(item.id, photoPath);
   }
 
@@ -154,6 +172,13 @@ export async function importTrackerItems(client: SupabaseClient, userId: string,
         attributes: entry.attributes ?? null, created_at: entry.createdAt,
       })));
       if (eventsError) throw eventsError;
+    }
+    if (item.priceHistory?.length) {
+      const { error: historyError } = await client.from("product_price_observations").upsert(item.priceHistory.map((entry) => ({
+        id: entry.id, item_id: item.id, user_id: userId, amount: entry.amount, currency: entry.currency,
+        source: entry.source ?? "product-page", variant: entry.variant ?? null, observed_at: entry.observedAt,
+      })));
+      if (historyError) throw historyError;
     }
     normalized.set(item.id, safePhotoPath);
   }
