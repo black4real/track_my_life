@@ -74,7 +74,69 @@ export type BackupFile = {
   version: 1;
   exportedAt: string;
   items: TrackedItem[];
+  routine?: RoutineData;
 };
+
+export type RoutineSlot = "morning" | "night";
+export type RoutineProduct = {
+  id: string;
+  name: string;
+  brand?: string;
+  linkedItemId?: string;
+  photo?: string;
+  photoPath?: string;
+};
+export type RoutinePhase = {
+  id: string;
+  stepId: string;
+  productId: string;
+  slot: RoutineSlot;
+  position: number;
+  startDate?: string;
+  endDate?: string;
+  targetDuration?: number;
+  targetUnit?: "weeks" | "months";
+  createdAt: string;
+};
+export type RoutineConcern = {
+  id: string;
+  name: string;
+  notes?: string;
+  status: "current" | "resolved";
+  createdAt: string;
+  resolvedAt?: string;
+};
+export type RoutineData = { products: RoutineProduct[]; phases: RoutinePhase[]; concerns: RoutineConcern[] };
+
+export const ROUTINE_STORAGE_KEY = "kept-routine-v1";
+export const EMPTY_ROUTINE_DATA: RoutineData = { products: [], phases: [], concerns: [] };
+
+export function validRoutineData(value: unknown): value is RoutineData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const data = value as Partial<RoutineData>;
+  const productsValid = Array.isArray(data.products) && data.products.every((product) => {
+    if (!product || typeof product !== "object") return false;
+    return typeof product.id === "string" && typeof product.name === "string" && product.name.length > 0 && product.name.length <= 160 &&
+      (product.brand === undefined || (typeof product.brand === "string" && product.brand.length <= 100)) &&
+      (product.linkedItemId === undefined || typeof product.linkedItemId === "string") &&
+      (product.photo === undefined || (typeof product.photo === "string" && product.photo.length <= 1_500_000 && (/^data:image\/(?:jpeg|webp|png);base64,/i.test(product.photo) || /^https:\/\//i.test(product.photo)))) &&
+      (product.photoPath === undefined || (typeof product.photoPath === "string" && product.photoPath.length <= 500 && !product.photoPath.startsWith("/") && !product.photoPath.includes("..")));
+  });
+  const phasesValid = Array.isArray(data.phases) && data.phases.every((phase) => {
+    if (!phase || typeof phase !== "object") return false;
+    return typeof phase.id === "string" && typeof phase.stepId === "string" && typeof phase.productId === "string" && ["morning", "night"].includes(phase.slot) && Number.isInteger(phase.position) && phase.position >= 0 &&
+      (phase.startDate === undefined || typeof phase.startDate === "string") && (phase.endDate === undefined || typeof phase.endDate === "string") &&
+      (phase.targetDuration === undefined || (Number.isInteger(phase.targetDuration) && phase.targetDuration >= 1 && phase.targetDuration <= 1200)) &&
+      (phase.targetUnit === undefined || ["weeks", "months"].includes(phase.targetUnit)) && typeof phase.createdAt === "string";
+  });
+  const concernsValid = Array.isArray(data.concerns) && data.concerns.every((concern) => {
+    if (!concern || typeof concern !== "object") return false;
+    return typeof concern.id === "string" && typeof concern.name === "string" && concern.name.length > 0 && concern.name.length <= 160 &&
+      (concern.notes === undefined || (typeof concern.notes === "string" && concern.notes.length <= 2000)) && ["current", "resolved"].includes(concern.status) && typeof concern.createdAt === "string" &&
+      (concern.resolvedAt === undefined || typeof concern.resolvedAt === "string");
+  });
+  return productsValid && phasesValid && concernsValid;
+}
 
 export const STORAGE_KEY = "kept-tracker-v1";
 export const CATEGORIES = ["Clothes", "Accessories", "Tech", "Grooming", "Fitness", "Health & supplements", "Skincare", "Home", "Vehicle", "Other"];

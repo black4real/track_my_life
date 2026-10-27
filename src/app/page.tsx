@@ -6,14 +6,16 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ageLabel, BackupFile, CATEGORIES, detailFields, EventKind, formatDate, formatMoney, ITEM_TYPES, ItemEvent,
-  fallbackItemImage, lastOfKind, makeId, ProductVariant, purchases, sortedEvents, STORAGE_KEY, TrackedItem, validItems,
+  ageLabel, BackupFile, CATEGORIES, detailFields, EMPTY_ROUTINE_DATA, EventKind, formatDate, formatMoney, ITEM_TYPES, ItemEvent,
+  fallbackItemImage, lastOfKind, makeId, ProductVariant, purchases, ROUTINE_STORAGE_KEY, RoutineData, sortedEvents, STORAGE_KEY, TrackedItem, validItems, validRoutineData,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
 import { CalendarView } from "@/app/calendar-view";
+import { RoutineView } from "@/app/routine-view";
 import { detectRetailer, RETAILERS } from "@/lib/retailers";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { importTrackerItems, loadTrackerItems, makeCloudCompatibleItems, syncTrackerItems } from "@/lib/supabase/tracker";
+import { loadRoutineData, syncRoutineData } from "@/lib/supabase/routine";
 import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"];
@@ -25,6 +27,14 @@ type AddProductPreview = ProductLookup;
 
 function validMascot(value: unknown): value is ProfileMascot {
   return typeof value === "string" && PROFILE_MASCOTS.includes(value as ProfileMascot);
+}
+const MASCOT_BACKGROUNDS: Record<ProfileMascot, string> = {
+  sprout: "dce8c7", moth: "eadfce", cat: "eadde1", moon: "dce3ed", finch: "e7e4cf", pebble: "dce4dc",
+};
+
+function mascotImageUrl(name: ProfileMascot) {
+  const background = MASCOT_BACKGROUNDS[name];
+  return `https://api.dicebear.com/10.x/thumbs/svg?seed=kept-${name}&backgroundColor=${background}&radius=50`;
 }
 
 function Icon({ name, size = 18 }: { name: "plus" | "search" | "download" | "upload" | "close" | "arrow" | "trash" | "spark" | "refresh" | "moon" | "sun"; size?: number }) {
@@ -68,13 +78,16 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(!supabaseConfigured);
   const [ready, setReady] = useState(!supabaseConfigured);
+  const [routineLoaded, setRoutineLoaded] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [migrationItems, setMigrationItems] = useState<TrackedItem[] | null>(null);
+  const [migrationRoutineData, setMigrationRoutineData] = useState<RoutineData | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All things");
-  const [view, setView] = useState<"library" | "calendar">("library");
+  const [view, setView] = useState<"library" | "calendar" | "routine">("library");
+  const [routineData, setRoutineData] = useState<RoutineData>(EMPTY_ROUTINE_DATA);
   const [modal, setModal] = useState<"item" | "event" | "variant" | null>(null);
   const [formError, setFormError] = useState("");
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
@@ -134,7 +147,9 @@ export default function Home() {
   const productPhotoInput = useRef<HTMLInputElement>(null);
   const addProductPhotoInput = useRef<HTMLInputElement>(null);
   const lastSyncedItems = useRef<TrackedItem[]>([]);
+  const lastSyncedRoutine = useRef<RoutineData>(EMPTY_ROUTINE_DATA);
   const syncQueue = useRef<Promise<void>>(Promise.resolve());
+  const routineSyncQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     const media = window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 920px)");
     const update = () => setIsMobileLayout(media.matches);
@@ -158,24 +173,27 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const shouldBlockPage = Boolean(modal) || (profileOpen && isMobileLayout);
+    // Desktop forms are inline in the library column, so keep the page visible
+    // and scrollable. Only phone-sized sheets should lock the page underneath.
+    const shouldBlockPage = isMobileLayout && (Boolean(modal) || profileOpen);
     if (shouldBlockPage) {
       document.body.classList.add("overlay-open");
       const scrollY = window.scrollY;
-      if (isMobileLayout) {
-        document.body.style.position = "fixed";
-        document.body.style.top = `-${scrollY}px`;
-        document.body.style.width = "100%";
-      }
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = "100%";
       return () => {
         document.body.classList.remove("overlay-open");
         document.body.style.position = "";
         document.body.style.top = "";
         document.body.style.width = "";
-        if (isMobileLayout) window.scrollTo({ top: scrollY, behavior: "instant" });
+        window.scrollTo({ top: scrollY, behavior: "instant" });
       };
     }
     document.body.classList.remove("overlay-open");
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.width = "";
   }, [modal, profileOpen, isMobileLayout]);
 
   useEffect(() => {
@@ -184,7 +202,15 @@ export default function Home() {
       formReturnFocus.current = null;
       return;
     }
-    requestAnimationFrame(() => formCloseButton.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      if (isMobileLayout) {
+        formCloseButton.current?.focus({ preventScroll: true });
+        return;
+      }
+      const dialog = document.querySelector<HTMLElement>(".inline-form-card[role='dialog']");
+      const firstField = dialog?.querySelector<HTMLElement>(".entry-form input:not(:disabled), .entry-form select:not(:disabled), .entry-form textarea:not(:disabled)");
+      (firstField ?? formCloseButton.current)?.focus({ preventScroll: true });
+    });
     const handleKeyDown = (event: KeyboardEvent) => {
       const dialog = document.querySelector<HTMLElement>(".inline-form-card[role='dialog']");
       if (!dialog) return;
@@ -194,7 +220,7 @@ export default function Home() {
         setFormError("");
         return;
       }
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab" || !isMobileLayout) return;
       const focusable = [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, a[href]")].filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
       if (!focusable.length) return;
       const first = focusable[0];
@@ -204,7 +230,7 @@ export default function Home() {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [modal]);
+  }, [modal, isMobileLayout]);
 
   useEffect(() => {
     if (!profileOpen && !moreOpen) return;
@@ -279,15 +305,23 @@ export default function Home() {
         loadedUserId = userId;
         setCloudReady(false); setReady(false);
         try {
-          const cloudItems = await loadTrackerItems(supabase, userId);
+          const [cloudItems, cloudRoutine] = await Promise.all([loadTrackerItems(supabase, userId), loadRoutineData(supabase, userId)]);
           if (!active) return;
           lastSyncedItems.current = cloudItems;
+          lastSyncedRoutine.current = cloudRoutine;
           setItems(cloudItems);
+          setRoutineData(cloudRoutine);
+          setRoutineLoaded(true);
           setCloudReady(true);
           const decisionKey = `kept-import-asked-${userId}`;
           const saved = localStorage.getItem(STORAGE_KEY);
           const localItems: unknown = saved ? JSON.parse(saved) : [];
-          if (!localStorage.getItem(decisionKey) && validItems(localItems) && localItems.length) setMigrationItems(localItems);
+          const savedRoutine = localStorage.getItem(ROUTINE_STORAGE_KEY);
+          const localRoutine: unknown = savedRoutine ? JSON.parse(savedRoutine) : EMPTY_ROUTINE_DATA;
+          if (!localStorage.getItem(decisionKey)) {
+            if (validItems(localItems) && localItems.length) setMigrationItems(localItems);
+            if (validRoutineData(localRoutine) && (localRoutine.products.length || localRoutine.phases.length || localRoutine.concerns.length)) setMigrationRoutineData(localRoutine);
+          }
           setReady(true);
         } catch (error) {
           if (active) { setNotice(error instanceof Error ? error.message : "Could not load your saved records."); setReady(true); }
@@ -306,13 +340,42 @@ export default function Home() {
           const parsed: unknown = JSON.parse(saved);
           if (validItems(parsed)) setItems(parsed);
         }
+        const savedRoutine = localStorage.getItem(ROUTINE_STORAGE_KEY);
+        if (savedRoutine) {
+          const parsedRoutine: unknown = JSON.parse(savedRoutine);
+          if (validRoutineData(parsedRoutine)) setRoutineData(parsedRoutine);
+        }
       } catch {
         setNotice("Your saved record could not be read. You can restore a backup to continue.");
       }
+      setRoutineLoaded(true);
       setReady(true);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [supabaseConfigured]);
+
+  useEffect(() => {
+    if (!ready || !routineLoaded) return;
+    if (!supabaseConfigured) {
+      try { localStorage.setItem(ROUTINE_STORAGE_KEY, JSON.stringify(routineData)); }
+      catch { window.setTimeout(() => setNotice("Routine could not be saved in this browser. Export a backup to keep your changes."), 0); }
+      return;
+    }
+    if (!user || !cloudReady) return;
+    if (JSON.stringify(lastSyncedRoutine.current) === JSON.stringify(routineData)) return;
+    const previous = lastSyncedRoutine.current;
+    const next = routineData;
+    lastSyncedRoutine.current = next;
+    const supabase = createClient();
+    routineSyncQueue.current = routineSyncQueue.current.then(async () => {
+      const normalized = await syncRoutineData(supabase, user.id, next);
+      lastSyncedRoutine.current = normalized;
+      setRoutineData((current) => JSON.stringify(current) === JSON.stringify(next) ? normalized : current);
+    }).catch((error: unknown) => {
+      lastSyncedRoutine.current = previous;
+      setNotice(error instanceof Error ? `Could not save your routine: ${error.message}` : "Could not save your routine. Try again.");
+    });
+  }, [routineData, ready, routineLoaded, user, cloudReady, supabaseConfigured]);
 
   useEffect(() => {
     let savedTheme: string | null = null;
@@ -871,7 +934,17 @@ export default function Home() {
         return { ...item, productPhoto: dataUrl };
       } catch { return { ...item, productPhoto: undefined }; }
     }));
-    const backup: BackupFile = { format: "kept-backup", version: 1, exportedAt: new Date().toISOString(), items: backupItems };
+    const backupProducts = await Promise.all(routineData.products.map(async (product) => {
+      if (!product.photo || product.photo.startsWith("data:image/")) return { ...product, photoPath: undefined };
+      try {
+        const response = await fetch(product.photo);
+        if (!response.ok) return { ...product, photo: undefined, photoPath: undefined };
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+        return { ...product, photo: dataUrl, photoPath: undefined };
+      } catch { return { ...product, photo: undefined, photoPath: undefined }; }
+    }));
+    const backup: BackupFile = { format: "kept-backup", version: 1, exportedAt: new Date().toISOString(), items: backupItems, routine: { ...routineData, products: backupProducts } };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -882,17 +955,31 @@ export default function Home() {
   }
 
   async function importLocalRecords() {
-    if (!user || !migrationItems || migrationBusy) return;
+    if (!user || (!migrationItems && !migrationRoutineData) || migrationBusy) return;
     setMigrationBusy(true);
     try {
       const existingIds = new Set(items.map((item) => item.id));
-      const toImport = makeCloudCompatibleItems(migrationItems.filter((item) => !existingIds.has(item.id)));
+      const localItems = migrationItems ?? [];
+      const additions = localItems.filter((item) => !existingIds.has(item.id));
+      const toImport = makeCloudCompatibleItems(additions);
+      const idMap = new Map(additions.map((item, index) => [item.id, toImport[index]?.id ?? item.id]));
       const photoPaths = await importTrackerItems(createClient(), user.id, toImport);
       const merged = [...items, ...toImport.map((item) => ({ ...item, productPhotoPath: photoPaths.get(item.id) }))];
+      const localRoutine = migrationRoutineData ?? EMPTY_ROUTINE_DATA;
+      const mappedProducts = localRoutine.products.map((product) => ({ ...product, linkedItemId: product.linkedItemId ? idMap.get(product.linkedItemId) ?? product.linkedItemId : undefined }));
+      const importedRoutine: RoutineData = {
+        products: [...routineData.products, ...mappedProducts.filter((product) => !routineData.products.some((current) => current.id === product.id))],
+        phases: [...routineData.phases, ...localRoutine.phases.filter((phase) => !routineData.phases.some((current) => current.id === phase.id))],
+        concerns: [...routineData.concerns, ...localRoutine.concerns.filter((concern) => !routineData.concerns.some((current) => current.id === concern.id))],
+      };
+      const normalizedRoutine = await syncRoutineData(createClient(), user.id, importedRoutine);
       lastSyncedItems.current = merged;
+      lastSyncedRoutine.current = normalizedRoutine;
       setItems(merged);
+      setRoutineData(normalizedRoutine);
       localStorage.setItem(`kept-import-asked-${user.id}`, "done");
       setMigrationItems(null);
+      setMigrationRoutineData(null);
       setSelectedId(toImport[0]?.id ?? items[0]?.id ?? null);
       announce(toImport.length ? `${toImport.length} local record${toImport.length === 1 ? "" : "s"} added to your account.` : "Those records are already in your account.");
     } catch (error) {
@@ -903,6 +990,7 @@ export default function Home() {
   function deferLocalImport() {
     if (user) localStorage.setItem(`kept-import-asked-${user.id}`, "done");
     setMigrationItems(null);
+    setMigrationRoutineData(null);
   }
 
   async function signOut() {
@@ -941,10 +1029,13 @@ export default function Home() {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text()) as Partial<BackupFile>;
-      if (parsed.format !== "kept-backup" || parsed.version !== 1 || !validItems(parsed.items)) throw new Error("invalid backup");
+      if (parsed.format !== "kept-backup" || parsed.version !== 1 || !validItems(parsed.items) || (parsed.routine !== undefined && !validRoutineData(parsed.routine))) throw new Error("invalid backup");
       if (!window.confirm(`Restore ${parsed.items.length} item${parsed.items.length === 1 ? "" : "s"}? This replaces the records ${user ? "in your account" : "in this browser"}.`)) return;
       const restored = user ? makeCloudCompatibleItems(parsed.items) : parsed.items;
+      const restoredIdMap = new Map(parsed.items.map((item, index) => [item.id, restored[index]?.id ?? item.id]));
       setItems(restored);
+      const restoredRoutine = parsed.routine && validRoutineData(parsed.routine) ? parsed.routine : EMPTY_ROUTINE_DATA;
+      setRoutineData(user ? { ...restoredRoutine, products: restoredRoutine.products.map((product) => ({ ...product, linkedItemId: product.linkedItemId ? restoredIdMap.get(product.linkedItemId) ?? product.linkedItemId : undefined })) } : restoredRoutine);
       setSelectedId(restored[0]?.id ?? null);
       setSearch("");
       setCategory("All things");
@@ -1033,37 +1124,37 @@ export default function Home() {
   return (
     <main className="app-shell">
       <a className="skip-link" href="#main-content">Skip to page content</a>
-      <header className="topbar">
+      <header className={`topbar${profileOpen ? " profile-open" : ""}`}>
         <Link className="wordmark" href="/" aria-label="Kept, home"><span className="brand-mark">k.</span><span>kept</span></Link>
         <div className="topbar-note"><span className="status-dot" /> A small record of what stays</div>
         <div className="top-actions">
           <button className="quiet-button theme-button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
             <Icon name={theme === "dark" ? "sun" : "moon"} size={16} /><span>{theme === "dark" ? "Light" : "Dark"}</span>
           </button>
-          <button className="quiet-button backup-button" onClick={exportBackup} disabled={!items.length} title={!items.length ? "Add something before exporting a backup" : "Download a backup"}>
+          <button className="quiet-button backup-button" onClick={exportBackup} disabled={!items.length && !routineData.phases.length && !routineData.concerns.length} title={!items.length && !routineData.phases.length && !routineData.concerns.length ? "Add something before exporting a backup" : "Download a backup"}>
             <Icon name="download" size={16} /><span>Back up</span>
           </button>
           <button className="quiet-button restore-button" onClick={() => importInput.current?.click()}><Icon name="upload" size={16} /><span>Restore</span></button>
           <div className="more-menu-wrap" ref={moreMenu}>
             <button className="quiet-button more-menu-trigger" aria-expanded={moreOpen} aria-haspopup="menu" onClick={() => setMoreOpen((open) => !open)}>More <span aria-hidden="true">⌄</span></button>
             {moreOpen ? <div className="more-menu" role="menu" aria-label="More actions">
-              <button role="menuitem" onClick={() => { exportBackup(); setMoreOpen(false); }} disabled={!items.length}><Icon name="download" size={16} /> Back up</button>
+              <button role="menuitem" onClick={() => { exportBackup(); setMoreOpen(false); }} disabled={!items.length && !routineData.phases.length && !routineData.concerns.length}><Icon name="download" size={16} /> Back up</button>
               <button role="menuitem" onClick={() => { importInput.current?.click(); setMoreOpen(false); }}><Icon name="upload" size={16} /> Restore</button>
             </div> : null}
           </div>
           {user ? <div className="profile-menu-wrap" ref={profileMenu}>
             <button className="profile-trigger" onClick={() => { setDeliveryPin(String(user.user_metadata?.kept_delivery_pin ?? "")); setProfileOpen((open) => !open); }} aria-expanded={profileOpen} aria-haspopup="dialog" aria-label="Open profile settings">
-              <span className={`profile-avatar mascot-${profileMascot}`}><MascotMark name={profileMascot} /></span><span className="profile-trigger-label">Profile</span>
+              <span className={`profile-avatar mascot-${profileMascot}`}><img src={mascotImageUrl(profileMascot)} alt="" /></span><span className="profile-trigger-label">Profile</span>
             </button>
             {profileOpen ? <section className="profile-popover" role="dialog" aria-modal={isMobileLayout} aria-label="Profile settings">
-              <div className="profile-popover-heading"><div><p className="eyebrow">YOUR ACCOUNT</p><strong>Profile picture</strong></div><button ref={profileCloseButton} className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile settings"><Icon name="close" size={16} /></button></div>
-              <p className="profile-email">{user.email}</p>
-              <p className="profile-prompt">Choose a little mascot for your account.</p>
-              <div className="mascot-grid" aria-label="Profile picture options">
+              <div className="profile-popover-heading"><div><p className="eyebrow">YOUR ACCOUNT</p><strong>Your profile<span className="period">.</span></strong></div><button ref={profileCloseButton} className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile settings"><Icon name="close" size={18} /></button></div>
+              <div className="profile-account-card"><span className={`profile-avatar profile-avatar-large mascot-${profileMascot}`}><img src={mascotImageUrl(profileMascot)} alt="" /></span><span><strong>Kept account</strong><small>{user.email}</small></span></div>
+              <section className="profile-avatar-section" aria-labelledby="profile-avatar-heading"><div className="profile-section-heading"><div><h3 id="profile-avatar-heading">Your avatar</h3><p>Choose a character for your account.</p></div><span>{PROFILE_MASCOTS.indexOf(profileMascot) + 1} / {PROFILE_MASCOTS.length}</span></div>
+              <div className="mascot-grid" aria-label="Profile avatar options">
                 {PROFILE_MASCOTS.map((mascot) => <button key={mascot} type="button" className={`mascot-option mascot-${mascot}${profileMascot === mascot ? " selected" : ""}`} onClick={() => saveProfileMascot(mascot)} disabled={profileBusy} aria-pressed={profileMascot === mascot} aria-label={`${mascot} profile picture`} title={mascot}>
-                  <MascotMark name={mascot} /><span>{mascot}</span>
+                  <img src={mascotImageUrl(mascot)} alt="" loading="lazy" /><span>{mascot}</span>
                 </button>)}
-              </div>
+              </div><small className="avatar-credit">Character art by <a href="https://www.dicebear.com/styles/thumbs/" target="_blank" rel="noreferrer">DiceBear Thumbs</a> · CC0</small></section>
               <form className="delivery-pin-form" onSubmit={saveDeliveryPin}>
                 <label className="field"><span>Delivery PIN <b>OPTIONAL</b></span><input inputMode="numeric" autoComplete="postal-code" pattern="[0-9]{6}" maxLength={6} value={deliveryPin} onChange={(event) => setDeliveryPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit PIN code" aria-describedby="delivery-pin-help" /></label>
                 <small id="delivery-pin-help">Saved to your account. Current product lookups do not share it with shops.</small>
@@ -1079,6 +1170,7 @@ export default function Home() {
       <nav className="view-switch" aria-label="Main views">
         <button type="button" className={view === "library" ? "active" : ""} aria-current={view === "library" ? "page" : undefined} onClick={() => { setView("library"); setSelectedId(null); }}>Library</button>
         <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => { setView("calendar"); setSelectedId(null); }}>Calendar</button>
+        <button type="button" className={view === "routine" ? "active" : ""} aria-current={view === "routine" ? "page" : undefined} onClick={() => { setView("routine"); setSelectedId(null); }}>Routine</button>
       </nav>
 
       <div id="main-content">
@@ -1093,8 +1185,8 @@ export default function Home() {
 
       {!supabaseConfigured ? <p className="local-mode-note">Saved on this browser. Add Supabase details to enable account sign-in and cloud sync.</p> : null}
 
-      {migrationItems ? <section className="migration-card" aria-labelledby="migration-title">
-        <div><p className="eyebrow">YOUR BROWSER HAS SAVED RECORDS</p><h2 id="migration-title">Bring your list into this account?</h2><p>{migrationItems.length} item{migrationItems.length === 1 ? "" : "s"}{migrationItems.some((item) => item.productPhoto || item.productPhotoPath) ? `, including ${migrationItems.filter((item) => item.productPhoto || item.productPhotoPath).length} photo${migrationItems.filter((item) => item.productPhoto || item.productPhotoPath).length === 1 ? "" : "s"}` : ""}. Purchases, notes, and product links will be copied. Your browser copy stays here.</p></div>
+      {(migrationItems || migrationRoutineData) ? <section className="migration-card" aria-labelledby="migration-title">
+        <div><p className="eyebrow">YOUR BROWSER HAS SAVED RECORDS</p><h2 id="migration-title">Bring your list into this account?</h2><p>{migrationItems?.length ?? 0} item{migrationItems?.length === 1 ? "" : "s"}{migrationRoutineData ? `, ${migrationRoutineData.phases.length} routine period${migrationRoutineData.phases.length === 1 ? "" : "s"}, and ${migrationRoutineData.concerns.length} concern${migrationRoutineData.concerns.length === 1 ? "" : "s"}` : ""}. Your browser copy stays here.</p></div>
         <div className="migration-actions"><button className="button button-primary" onClick={importLocalRecords} disabled={migrationBusy}>{migrationBusy ? "Importing…" : "Import records"}</button><button className="text-button" onClick={deferLocalImport} disabled={migrationBusy}>Not now</button></div>
       </section> : null}
 
@@ -1190,11 +1282,13 @@ export default function Home() {
       </section>
       </> : null}
       <div className="calendar-keep-alive" hidden={view !== "calendar"}><CalendarView items={items} onOpenItem={openCalendarItem} isMobileLayout={isMobileLayout} /></div>
+      <div className="routine-keep-alive" hidden={view !== "routine"}><RoutineView data={routineData} onChange={setRoutineData} items={items} /></div>
       </div>
 
       <nav className="mobile-tabbar" aria-label="Primary navigation">
         <button type="button" className={view === "library" ? "active" : ""} aria-current={view === "library" ? "page" : undefined} onClick={() => { setView("library"); setSelectedId(null); }}><span aria-hidden="true">▤</span>Library</button>
         <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => { setView("calendar"); setSelectedId(null); }}><span aria-hidden="true">▦</span>Calendar</button>
+        <button type="button" className={view === "routine" ? "active" : ""} aria-current={view === "routine" ? "page" : undefined} onClick={() => { setView("routine"); setSelectedId(null); }}><span aria-hidden="true">◷</span>Routine</button>
       </nav>
 
       <footer className="page-footer"><Link className="footer-brand" href="/">kept<span>.</span></Link></footer>
@@ -1202,17 +1296,4 @@ export default function Home() {
       <div className="toast" role="status" aria-live="polite" data-visible={Boolean(notice)}>{notice}</div>
     </main>
   );
-}
-
-function MascotMark({ name }: { name: ProfileMascot }) {
-  const base = { viewBox: "0 0 40 40", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const };
-  const drawings: Record<ProfileMascot, React.ReactNode> = {
-    sprout: <><path d="M20 31V19" /><path d="M20 23c-7 0-11-4-11-10 7 0 11 4 11 10Z" /><path d="M20 19c0-7 4-11 11-11 0 7-4 11-11 11Z" /><path d="M14 32h12" /></>,
-    moth: <><path d="M20 17c-3-8-12-10-13-3-1 5 4 9 11 9-6 1-8 6-4 8 4 1 7-3 8-8" /><path d="M20 17c3-8 12-10 13-3 1 5-4 9-11 9 6 1 8 6 4 8-4 1-7-3-8-8" /><path d="M18 13l-3-4m7 4 3-4" /></>,
-    cat: <><path d="m10 17 2-9 8 6 8-6 2 9v9c0 5-4 8-10 8s-10-3-10-8v-9Z" /><path d="M15 22h.1m9.8 0h.1M17 28c2 2 4 2 6 0" /><path d="m12 25-5 1m6 2-5 3m20-6 5 1m-6 2 5 3" /></>,
-    moon: <><path d="M27 28c-9 0-15-7-13-16 1-3 2-5 4-7C10 7 5 14 6 22c1 9 9 15 18 13 5-1 9-5 11-10-2 2-5 3-8 3Z" /><path d="m27 9 .8 2.2L30 12l-2.2.8L27 15l-.8-2.2L24 12l2.2-.8L27 9Z" /></>,
-    finch: <><path d="M8 26c0-9 5-16 13-16 7 0 11 6 11 13v8H8v-5Z" /><path d="m22 18 10 4-10 4" /><circle cx="19" cy="19" r="1" fill="currentColor" stroke="none" /><path d="M12 31v3m14-3v3" /></>,
-    pebble: <><path d="M7 26c0-8 5-15 13-17 8-1 14 6 14 14 0 7-6 11-14 11S7 32 7 26Z" /><path d="M13 22c2-2 4-2 6 0m3 0c2-2 4-2 6 0M17 28c2 1 4 1 6 0" /></>,
-  };
-  return <svg {...base}>{drawings[name]}</svg>;
 }

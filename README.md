@@ -7,6 +7,8 @@ Kept is a personal tracker for the things you own, buy again, use, and maintain.
 - Add an item with only its name; dates, category, price, notes, and product link are optional.
 - Keep purchases, service, and use notes in a dated timeline.
 - Switch to a month calendar to browse dated events by day, with item photos and a list of that day’s activity.
+- Use the **Routine** section to keep ordered morning and night product steps, track each period of use, and maintain a separate current/resolved concerns list.
+- Link routine products to Library items or create routine-only products with their own photos.
 - Record purchase quantity and actual total paid, including discounts and bundles.
 - Add an item type and optional type-specific details. Clothing purchases can be logged one garment at a time with their own size, color, and paid amount.
 - Save product variants with separate listed prices.
@@ -31,7 +33,7 @@ Without Supabase environment values, Kept remains in local-browser mode. Follow 
 ## Supabase setup
 
 1. Create a Supabase project. The free plan is enough to get started; check its current limits and inactivity behavior on [Supabase pricing](https://supabase.com/pricing).
-2. In the Supabase SQL Editor, run [`supabase/migrations/20261026000100_tracker.sql`](./supabase/migrations/20261026000100_tracker.sql), then [`supabase/migrations/20261026000200_store_name.sql`](./supabase/migrations/20261026000200_store_name.sql), [`supabase/migrations/20261026000300_item_details.sql`](./supabase/migrations/20261026000300_item_details.sql), and [`supabase/migrations/20261026000400_product_price_history.sql`](./supabase/migrations/20261026000400_product_price_history.sql), in that order. The last migration creates the private, per-user product price history table.
+2. In the Supabase SQL Editor, run [`supabase/migrations/20261026000100_tracker.sql`](./supabase/migrations/20261026000100_tracker.sql), then [`supabase/migrations/20261026000200_store_name.sql`](./supabase/migrations/20261026000200_store_name.sql), [`supabase/migrations/20261026000300_item_details.sql`](./supabase/migrations/20261026000300_item_details.sql), [`supabase/migrations/20261026000400_product_price_history.sql`](./supabase/migrations/20261026000400_product_price_history.sql), [`supabase/migrations/20261027000100_product_groups.sql`](./supabase/migrations/20261027000100_product_groups.sql), and [`supabase/migrations/20261028000100_routine.sql`](./supabase/migrations/20261028000100_routine.sql), in that order. These create the private, per-user item, history, and Routine tables.
 3. In **Authentication → Sign In / Providers**, keep email/password enabled and enable Google after adding your Google OAuth client ID and secret. Add the Supabase callback URL shown on that provider page to the Google OAuth client.
 4. In **Authentication → Settings**, enable public sign-ups. Add `http://localhost:3000/**` and your deployed Vercel domain with `/**` to the allowed redirect URLs. Set the site URL to your deployed Vercel address. Email confirmation may be enabled; new users will need to confirm their email before signing in.
 5. New users can create their own accounts from Kept’s sign-in screen. With email confirmation enabled, they must confirm their address before signing in. Google sign-in is available once its provider is configured.
@@ -50,7 +52,7 @@ The default Supabase email sender is rate-limited. For regular invitations and p
 
 ## Database editing
 
-Use Supabase **Table Editor** to edit `items`, `variants`, `events`, and `product_price_observations`. Each record includes a `user_id`; the app uses row-level security to keep signed-in users isolated. Item IDs connect variants, timeline events, and price observations to their parent item. For product images, use the private `product-photos` bucket; the database stores a private object path rather than a public image URL.
+Use Supabase **Table Editor** to edit `items`, `variants`, `events`, `product_price_observations`, and `routine_data`. Each row includes a `user_id`; the app uses row-level security to keep signed-in users isolated. Item IDs connect variants, timeline events, and price observations to their parent item. Routine products, periods, and concerns are stored together per account in `routine_data`. For product images, use the private `product-photos` bucket; the database stores a private object path rather than a public image URL.
 
 Records you already saved in this browser remain there. After the first successful sign-in, Kept offers a one-time import and shows the number of items and photos before copying anything. Choosing **Not now** leaves the old browser records untouched. You can still use **Back up** and **Restore** at any time.
 
