@@ -19,6 +19,8 @@ export type TrackedItem = {
   name: string;
   category?: string;
   itemType?: string;
+  brand?: string;
+  relatedGroup?: string;
   specifications?: Record<string, string>;
   note?: string;
   productUrl?: string;
@@ -122,6 +124,8 @@ export function validItems(value: unknown): value is TrackedItem[] {
     typeof item.id === "string" && typeof item.name === "string" &&
     typeof item.createdAt === "string" && Array.isArray(item.events) &&
     (item.itemType === undefined || (typeof item.itemType === "string" && item.itemType.length <= 100)) &&
+    (item.brand === undefined || (typeof item.brand === "string" && item.brand.length <= 100)) &&
+    (item.relatedGroup === undefined || (typeof item.relatedGroup === "string" && item.relatedGroup.length <= 100)) &&
     validStringMap(item.specifications) &&
     (item.productUrl === undefined || (typeof item.productUrl === "string" && item.productUrl.length <= 2048 && isSafeHttpsUrl(item.productUrl))) &&
     (item.storeName === undefined || (typeof item.storeName === "string" && item.storeName.length <= 100)) &&
