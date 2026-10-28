@@ -676,6 +676,7 @@ html[data-theme="dark"] .toast { border-color: var(--toast-border); background: 
 .routine-form-heading, .routine-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .routine-form-heading strong { font-size: 16px; }
 .routine-source-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper-deep); }
+.routine-source-switch.has-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .routine-source-switch button { min-height: 40px; padding-inline: 8px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 650; }
 .routine-source-switch button.active { background: var(--white); color: var(--ink); box-shadow: 0 1px 4px rgb(23 36 30 / 9%); }
 .routine-library-picker { display: grid; gap: 9px; }
@@ -1038,6 +1039,7 @@ body.overlay-open::before { position: fixed; z-index: 49; inset: 0; content: "";
   .routine-card-actions { grid-column: 3; justify-content: flex-start; margin-top: -4px; }
   .routine-card-actions .text-button { min-height: 36px; font-size: 12px; }
   .routine-form { padding: 14px; }
+  .routine-source-switch button { font-size: 11px; }
   .routine-form .field-pair { grid-template-columns: minmax(0, 1fr); }
   .routine-form-actions { align-items: stretch; flex-direction: column; }
   .routine-form-actions .button { width: 100%; }
@@ -1051,6 +1053,7 @@ body.overlay-open::before { position: fixed; z-index: 49; inset: 0; content: "";
   .routine-slot-heading .button, .routine-section-heading .button { min-height: 42px; padding-inline: 9px; font-size: 11px; }
   .routine-product-card { grid-template-columns: 18px 44px minmax(0, 1fr); gap: 8px; }
   .routine-product-image { width: 44px; height: 50px; }
+  .routine-source-switch.has-three { grid-template-columns: minmax(0, 1fr); }
 }
 @media (min-width: 761px) and (max-width: 920px) and (pointer: fine) {
   .routine-slots { grid-template-columns: minmax(0, 1fr); }
