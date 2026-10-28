@@ -7,7 +7,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 type ItemRow = {
   id: string; name: string; category: string | null; note: string | null; product_url: string | null; store_name: string | null; brand: string | null; related_group: string | null;
   item_type: string | null; specifications: TrackedItem["specifications"] | null;
-  product_photo_path: string | null; listed_price_override: TrackedItem["listedPriceOverride"] | null;
+  product_photo_path: string | null; listed_price_override: TrackedItem["listedPriceOverride"] | null; archived_at: string | null; consumable: TrackedItem["consumable"] | null;
   current_product: TrackedItem["currentProduct"] | null; created_at: string;
 };
 type EventRow = { id: string; kind: ItemEvent["kind"]; date: string | null; amount: number | null; currency: string | null; quantity: number | null; variant: string | null; note: string | null; feeling: ItemEvent["feeling"] | null; attributes: ItemEvent["attributes"] | null; item_id: string; user_id: string; created_at: string };
@@ -42,6 +42,7 @@ export async function loadTrackerItems(client: SupabaseClient, userId: string): 
       specifications: row.specifications ?? undefined, note: row.note ?? undefined,
       productUrl: row.product_url ?? undefined, storeName: row.store_name ?? undefined, productPhoto, productPhotoPath: row.product_photo_path ?? undefined,
       listedPriceOverride: row.listed_price_override ?? undefined, currentProduct: row.current_product ?? undefined,
+      archivedAt: row.archived_at ?? undefined, consumable: row.consumable ?? undefined,
       priceHistory: observations.filter((entry) => entry.item_id === row.id).map((entry) => ({
         id: entry.id, amount: Number(entry.amount), currency: entry.currency, source: entry.source,
         variant: entry.variant ?? undefined, observedAt: entry.observed_at,
@@ -94,6 +95,7 @@ export async function syncTrackerItems(client: SupabaseClient, userId: string, p
       specifications: item.specifications ?? null, note: item.note ?? null,
       product_url: item.productUrl ?? null, store_name: item.storeName ?? null, product_photo_path: photoPath ?? null,
       listed_price_override: item.listedPriceOverride ?? null, current_product: item.currentProduct ?? null,
+      archived_at: item.archivedAt ?? null, consumable: item.consumable ?? null,
       created_at: item.createdAt,
     });
     if (itemError) throw itemError;
@@ -164,6 +166,7 @@ export async function importTrackerItems(client: SupabaseClient, userId: string,
       specifications: item.specifications ?? null, note: item.note ?? null,
       product_url: item.productUrl ?? null, store_name: item.storeName ?? null, product_photo_path: safePhotoPath ?? null,
       listed_price_override: item.listedPriceOverride ?? null, current_product: item.currentProduct ?? null,
+      archived_at: item.archivedAt ?? null, consumable: item.consumable ?? null,
       created_at: item.createdAt,
     });
     if (error) throw error;

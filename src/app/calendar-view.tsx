@@ -15,7 +15,7 @@ function localDateKey(date: Date) {
 }
 
 function eventLabel(kind: ItemEvent["kind"]) {
-  return kind === "purchase" ? "Bought" : kind === "service" ? "Care" : "Use note";
+  return kind === "purchase" ? "Bought" : kind === "service" ? "Care" : kind === "opened" ? "Container opened" : kind === "finished" ? "Container finished" : "Use note";
 }
 
 function itemPhoto(item: TrackedItem) {

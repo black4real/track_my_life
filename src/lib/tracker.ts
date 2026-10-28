@@ -1,4 +1,4 @@
-export type EventKind = "purchase" | "service" | "use";
+export type EventKind = "purchase" | "service" | "use" | "opened" | "finished";
 
 export type ItemEvent = {
   id: string;
@@ -12,6 +12,15 @@ export type ItemEvent = {
   feeling?: "loved" | "okay" | "regret";
   attributes?: Record<string, string>;
   createdAt: string;
+};
+
+export type ConsumableTracking = {
+  /** Day tracking began. Purchases after this day contribute to stock calculations. */
+  trackingStartedAt: string;
+  /** Unopened containers already on hand when tracking began. */
+  unopenedAtStart: number;
+  /** ID of the opened event for the currently open container, if any. */
+  currentOpenEventId?: string;
 };
 
 export type TrackedItem = {
@@ -43,6 +52,8 @@ export type TrackedItem = {
   };
   priceHistory?: ProductPriceObservation[];
   variants?: ProductVariant[];
+  archivedAt?: string;
+  consumable?: ConsumableTracking;
   createdAt: string;
   events: ItemEvent[];
 };
@@ -153,6 +164,27 @@ export const ITEM_TYPES: Record<string, string[]> = {
   Skincare: ["Cream", "Gel", "Lotion", "Serum", "Sunscreen", "Cleanser"],
 };
 
+export function categoryForItemType(itemType?: string): string | undefined {
+  const normalized = itemType?.trim().toLocaleLowerCase();
+  if (!normalized) return undefined;
+  for (const [category, types] of Object.entries(ITEM_TYPES)) {
+    if (types.some((type) => type.toLocaleLowerCase() === normalized)) return category;
+  }
+  if (/hair\s*cut|haircut|barber/.test(normalized)) return "Grooming";
+  if (/bike\s*(service|maintenance)|vehicle\s*service/.test(normalized)) return "Vehicle";
+  if (/service|maintenance|repair/.test(normalized)) return "Other";
+  return undefined;
+}
+
+export function isServiceType(itemType?: string): boolean {
+  return /hair\s*cut|haircut|barber|\bservice\b|\bmaintenance\b|\brepair\b/.test((itemType ?? "").toLocaleLowerCase());
+}
+
+export function isConsumableType(category?: string, itemType?: string): boolean {
+  const text = `${category ?? ""} ${itemType ?? ""}`.toLocaleLowerCase();
+  return /skin|supplement|vitamin|protein|powder|sunscreen|cleanser|shampoo|conditioner|serum|moisturi[sz]er|cream|gel|lotion|soap|toothpaste|deodorant|perfume|fragrance/.test(text);
+}
+
 export function detailFields(category?: string, itemType?: string): { item: DetailField[]; purchase: DetailField[] } {
   const type = (itemType ?? "").toLowerCase();
   const clothes = category === "Clothes" || /hoodie|sweatshirt|t-shirt|shirt|jeans|trouser|bottom wear|shorts|jacket|apparel/.test(type);
@@ -161,7 +193,7 @@ export function detailFields(category?: string, itemType?: string): { item: Deta
   const perfume = /perfume|fragrance|cologne/.test(type);
   const consumable = ["Skincare", "Health & supplements"].includes(category ?? "") || /cream|gel|lotion|serum|sunscreen|cleanser|vitamin|supplement|protein powder/.test(type);
   if (shoes) return { item: [{ key: "material", label: "Material", placeholder: "Optional" }], purchase: [{ key: "size", label: "Size", placeholder: "e.g. 8, 42" }, { key: "color", label: "Color", placeholder: "e.g. black" }] };
-  if (clothes) return { item: [{ key: "fit", label: "Fit", placeholder: "e.g. loose fit" }, { key: "material", label: "Material", placeholder: "Optional" }], purchase: [{ key: "size", label: "Size", placeholder: "e.g. XL or 32/34" }, { key: "color", label: "Color", placeholder: "e.g. charcoal" }] };
+  if (clothes) return { item: [{ key: "fit", label: "Fit", placeholder: "e.g. loose fit" }, { key: "season", label: "Season", placeholder: "Choose one or more" }, { key: "material", label: "Material", placeholder: "Optional" }], purchase: [{ key: "size", label: "Size", placeholder: "e.g. XL or 32/34" }, { key: "color", label: "Color", placeholder: "e.g. charcoal" }] };
   if (watch) return { item: [{ key: "movement", label: "Movement", placeholder: "Automatic, quartz…" }, { key: "dial_color", label: "Dial color", placeholder: "Optional" }, { key: "band_color", label: "Band color", placeholder: "Optional" }], purchase: [] };
   if (perfume) return { item: [{ key: "concentration", label: "Concentration", placeholder: "EDP, EDT…" }, { key: "volume", label: "Volume", placeholder: "e.g. 50" }, { key: "unit", label: "Unit", placeholder: "ml" }], purchase: [] };
   if (consumable) return { item: [{ key: "form", label: "Form", placeholder: "Cream, gel, powder…" }, { key: "amount", label: "Amount", placeholder: "e.g. 100" }, { key: "unit", label: "Unit", placeholder: "g, mg, ml…" }], purchase: [] };
@@ -185,6 +217,11 @@ export function validItems(value: unknown): value is TrackedItem[] {
     item && typeof item === "object" &&
     typeof item.id === "string" && typeof item.name === "string" &&
     typeof item.createdAt === "string" && Array.isArray(item.events) &&
+    (item.archivedAt === undefined || typeof item.archivedAt === "string") &&
+    (item.consumable === undefined || (!!item.consumable && typeof item.consumable === "object" &&
+      typeof item.consumable.trackingStartedAt === "string" &&
+      Number.isInteger(item.consumable.unopenedAtStart) && item.consumable.unopenedAtStart >= 0 && item.consumable.unopenedAtStart <= 10000 &&
+      (item.consumable.currentOpenEventId === undefined || typeof item.consumable.currentOpenEventId === "string"))) &&
     (item.itemType === undefined || (typeof item.itemType === "string" && item.itemType.length <= 100)) &&
     (item.brand === undefined || (typeof item.brand === "string" && item.brand.length <= 100)) &&
     (item.relatedGroup === undefined || (typeof item.relatedGroup === "string" && item.relatedGroup.length <= 100)) &&
@@ -231,7 +268,7 @@ export function validItems(value: unknown): value is TrackedItem[] {
       if (!event || typeof event !== "object") return false;
       const candidate = event as Record<string, unknown>;
       return typeof candidate.id === "string" &&
-        ["purchase", "service", "use"].includes(String(candidate.kind)) &&
+        ["purchase", "service", "use", "opened", "finished"].includes(String(candidate.kind)) &&
         typeof candidate.createdAt === "string" &&
         (candidate.date === undefined || typeof candidate.date === "string") &&
         (candidate.amount === undefined || (typeof candidate.amount === "number" && Number.isFinite(candidate.amount))) &&
