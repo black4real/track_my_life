@@ -23,6 +23,9 @@ export function RoutineView({ data, onChange, items }: Props) {
   const [formMode, setFormMode] = useState<"add" | "switch" | "edit">("add");
   const [resettingSlot, setResettingSlot] = useState<RoutineSlot | null>(null);
   const [carryProductIds, setCarryProductIds] = useState<string[]>([]);
+  const [catalogForm, setCatalogForm] = useState(false);
+  const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [productSource, setProductSource] = useState<"library" | "routine" | "new">("new");
   const [linkedChoice, setLinkedChoice] = useState("");
   const [librarySearch, setLibrarySearch] = useState("");
@@ -47,6 +50,45 @@ export function RoutineView({ data, onChange, items }: Props) {
     setLinkedChoice(linkedItemExists ? existingProduct?.linkedItemId ?? "" : ""); setLibrarySearch(""); setProductName(existingProduct?.name ?? ""); setProductBrand(existingProduct?.brand ?? ""); setProductPhoto(existingProduct?.photo ?? ""); setPhotoError(""); setRoutineError("");
   };
   const closeForm = () => { setAddingSlot(null); setReplacing(null); setFormMode("add"); setRoutineError(""); };
+
+  function openCatalogForm(product?: RoutineProduct) {
+    const linked = product?.linkedItemId ? itemById.get(product.linkedItemId) : undefined;
+    setCatalogForm(true);
+    setEditingCatalogId(product?.id ?? null);
+    setProductName(linked?.name ?? product?.name ?? "");
+    setProductBrand(linked?.brand ?? product?.brand ?? "");
+    setProductPhoto(product?.photo ?? (linked ? itemPhoto(linked) ?? "" : ""));
+    setPhotoError(""); setRoutineError("");
+  }
+
+  function saveCatalogProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = productName.trim();
+    if (!name) { setRoutineError("Add a product name first."); return; }
+    const product: RoutineProduct = {
+      id: editingCatalogId ?? makeId(), name, brand: productBrand.trim() || undefined,
+      photo: productPhoto || undefined,
+    };
+    onChange({ ...data, products: editingCatalogId ? data.products.map((entry) => entry.id === editingCatalogId ? { ...entry, ...product, linkedItemId: undefined, photoPath: undefined } : entry) : [...data.products, product] });
+    setCatalogForm(false); setEditingCatalogId(null); setProductName(""); setProductBrand(""); setProductPhoto(""); setRoutineError("");
+  }
+
+  function addCatalogProductToRoutine(product: RoutineProduct, slot: RoutineSlot) {
+    if (phasesBySlot(slot).some((phase) => phase.productId === product.id)) return;
+    const phase: RoutinePhase = { id: makeId(), stepId: makeId(), productId: product.id, slot, position: phasesBySlot(slot).length, startDate: today(), createdAt: new Date().toISOString() };
+    onChange({ ...data, phases: [...data.phases, phase] });
+  }
+
+  function removeFromRoutine(phase: RoutinePhase) {
+    const rest = phasesBySlot(phase.slot).filter((entry) => entry.id !== phase.id);
+    const positions = new Map(rest.map((entry, index) => [entry.id, index]));
+    onChange({ ...data, phases: data.phases.map((entry) => entry.id === phase.id ? { ...entry, endDate: today() } : positions.has(entry.id) ? { ...entry, position: positions.get(entry.id)! } : entry) });
+  }
+
+  function deleteCatalogProduct(productId: string) {
+    onChange({ ...data, products: data.products.filter((product) => product.id !== productId), phases: data.phases.filter((phase) => phase.productId !== productId) });
+    setConfirmDeleteId(null);
+  }
 
   function readPhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -170,7 +212,7 @@ export function RoutineView({ data, onChange, items }: Props) {
               <span className="routine-order" aria-label={`Step ${index + 1}`}>{String(index + 1).padStart(2, "0")}</span>
               <div className="routine-product-image">{photo ? <img src={photo} alt="" /> : <span>{(linked?.name ?? product?.name ?? "?").slice(0, 1).toUpperCase()}</span>}</div>
               <div className="routine-product-copy"><h3>{linked?.name ?? product?.name ?? "Product"}</h3>{(linked?.brand ?? product?.brand) ? <p>{linked?.brand ?? product?.brand}</p> : null}<span>{elapsed(phase.startDate)}</span></div>
-              <div className="routine-card-actions"><button className="text-button" type="button" onClick={() => movePhase(slot, phase.id, -1)} disabled={index === 0} aria-label="Move product up">↑</button><button className="text-button" type="button" onClick={() => movePhase(slot, phase.id, 1)} disabled={index === phasesBySlot(slot).length - 1} aria-label="Move product down">↓</button><button className="text-button" type="button" onClick={() => openForm(slot, phase, "edit")}>Edit</button><button className="text-button" type="button" onClick={() => openForm(slot, phase, "switch")}>Switch</button></div>
+              <div className="routine-card-actions"><button className="text-button" type="button" onClick={() => movePhase(slot, phase.id, -1)} disabled={index === 0} aria-label="Move product up">↑</button><button className="text-button" type="button" onClick={() => movePhase(slot, phase.id, 1)} disabled={index === phasesBySlot(slot).length - 1} aria-label="Move product down">↓</button><button className="text-button" type="button" onClick={() => openForm(slot, phase, "edit")}>Edit</button><button className="text-button" type="button" onClick={() => openForm(slot, phase, "switch")}>Switch</button><button className="text-button routine-remove-step" type="button" onClick={() => removeFromRoutine(phase)}>Remove</button></div>
             </li>;
           })}
           {!phasesBySlot(slot).length ? <li className="routine-empty">No products here yet. Add one whenever you’re ready.</li> : null}
@@ -184,6 +226,12 @@ export function RoutineView({ data, onChange, items }: Props) {
         </form> : null}
       </section>)}
     </div>
+
+    <section className="routine-catalog" aria-labelledby="routine-catalog-title">
+      <div className="routine-section-heading"><div><p className="eyebrow">SAVED FOR LATER</p><h2 id="routine-catalog-title">Routine products<span className="period">.</span></h2><p>Add your usual products once, then add them to Morning or Night with one tap.</p></div>{!catalogForm ? <button className="button button-outline" type="button" onClick={() => openCatalogForm()}><span aria-hidden="true">＋</span> Add product</button> : null}</div>
+      {catalogForm ? <form className="routine-form catalog-form" onSubmit={saveCatalogProduct}><div className="routine-form-heading"><strong>{editingCatalogId ? "Edit saved product" : "Save product for later"}</strong><button className="text-button" type="button" onClick={() => { setCatalogForm(false); setEditingCatalogId(null); setRoutineError(""); }}>Cancel</button></div><label className="field"><span>Product name <b>REQUIRED</b></span><input value={productName} maxLength={160} onChange={(event) => setProductName(event.target.value)} placeholder="e.g. Azelaic acid" required /></label><div className="field-pair"><label className="field"><span>Brand</span><input value={productBrand} maxLength={100} onChange={(event) => setProductBrand(event.target.value)} placeholder="Optional" /></label><label className="field"><span>Photo</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={readPhoto} /></label></div>{photoError ? <p className="form-error" role="alert">{photoError}</p> : null}{productPhoto ? <div className="catalog-photo-preview"><img src={productPhoto} alt="Selected product" /><button className="text-button" type="button" onClick={() => setProductPhoto("")}>Remove photo</button></div> : null}{routineError ? <p className="form-error" role="alert">{routineError}</p> : null}<button className="button button-primary" type="submit">{editingCatalogId ? "Save changes" : "Save to product list"}</button></form> : null}
+      {data.products.length ? <ul className="routine-catalog-list">{data.products.map((product) => { const linked = product.linkedItemId ? itemById.get(product.linkedItemId) : undefined; const photo = linked ? itemPhoto(linked) : product.photo; const inMorning = phasesBySlot("morning").some((phase) => phase.productId === product.id); const inNight = phasesBySlot("night").some((phase) => phase.productId === product.id); return <li className="routine-catalog-card" key={product.id}><div className="routine-product-image">{photo ? <img src={photo} alt="" /> : <span>{(linked?.name ?? product.name).slice(0, 1).toUpperCase()}</span>}</div><div className="routine-product-copy"><h3>{linked?.name ?? product.name}</h3>{(linked?.brand ?? product.brand) ? <p>{linked?.brand ?? product.brand}</p> : null}{inMorning || inNight ? <span>In {inMorning && inNight ? "Morning and Night" : inMorning ? "Morning" : "Night"}</span> : <span>Not in a routine right now</span>}</div><div className="routine-catalog-actions"><button className="button button-outline" type="button" disabled={inMorning} onClick={() => addCatalogProductToRoutine(product, "morning")}>{inMorning ? "In Morning" : "+ Morning"}</button><button className="button button-outline" type="button" disabled={inNight} onClick={() => addCatalogProductToRoutine(product, "night")}>{inNight ? "In Night" : "+ Night"}</button><button className="text-button" type="button" onClick={() => openCatalogForm(product)}>Edit</button><button className="text-button" type="button" onClick={() => setConfirmDeleteId(product.id)}>Delete</button></div>{confirmDeleteId === product.id ? <div className="catalog-delete-confirm" role="group" aria-label={`Delete ${product.name}`}><span>Delete this product and its past routine history?</span><button className="text-button" type="button" onClick={() => setConfirmDeleteId(null)}>Cancel</button><button className="text-button" type="button" onClick={() => deleteCatalogProduct(product.id)}>Delete product</button></div> : null}</li>; })}</ul> : <p className="routine-empty">Your saved product list is empty. Add your products here once and reuse them whenever you need.</p>}
+    </section>
 
     <section className="routine-history" aria-labelledby="routine-history-title"><div className="routine-section-heading"><div><p className="eyebrow">WHAT YOU’VE USED</p><h2 id="routine-history-title">Past routine<span className="period">.</span></h2></div></div>{history.length ? <ol className="routine-history-list">{history.map((phase) => { const product = data.products.find((entry) => entry.id === phase.productId); const linked = product?.linkedItemId ? itemById.get(product.linkedItemId) : undefined; const photo = linked ? itemPhoto(linked) : product?.photo; return <li key={phase.id}><div className="routine-history-image">{photo ? <img src={photo} alt="" /> : <span>{(linked?.name ?? product?.name ?? "?").slice(0, 1).toUpperCase()}</span>}</div><div><strong>{linked?.name ?? product?.name ?? "Product"}</strong><span>{phase.slot === "morning" ? "Morning" : "Night"} · {formatDate(phase.startDate)} – {formatDate(phase.endDate)}</span></div><button className="text-button" type="button" onClick={() => openForm(phase.slot, phase, "edit")}>Edit</button></li>; })}</ol> : <p className="routine-empty">When you switch a product, its time here will be saved.</p>}</section>
 
