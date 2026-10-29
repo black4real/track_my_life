@@ -385,8 +385,11 @@ export default function Home() {
             const rawPending = localStorage.getItem(pendingKey);
             if (rawPending) {
               const parsedPending: unknown = JSON.parse(rawPending);
-              if (parsedPending && typeof parsedPending === "object" && "items" in parsedPending && validItems(parsedPending.items) && Array.isArray(parsedPending.deletedIds) && parsedPending.deletedIds.every((id: unknown) => typeof id === "string")) {
-                initialItems = mergePendingItems(cloudItems, parsedPending as PendingItemSnapshot);
+              if (parsedPending && typeof parsedPending === "object") {
+                const candidate = parsedPending as { items?: unknown; deletedIds?: unknown };
+                if (validItems(candidate.items) && Array.isArray(candidate.deletedIds) && candidate.deletedIds.every((id: unknown) => typeof id === "string")) {
+                  initialItems = mergePendingItems(cloudItems, candidate as PendingItemSnapshot);
+                }
               }
             }
           } catch { /* Use the cloud copy when no recoverable local save exists. */ }
