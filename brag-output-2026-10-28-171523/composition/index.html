@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape" data-composition-variables='[
+  {"id":"color-ground","type":"color","label":"Night paper","default":"#101713"},
+  {"id":"color-panel","type":"color","label":"Raised moss","default":"#1a241e"},
+  {"id":"color-ink","type":"color","label":"Ledger text","default":"#e7eadf"},
+  {"id":"color-accent","type":"color","label":"Leaf accent","default":"#c3df91"},
+  {"id":"font-display","type":"string","label":"Interface font","default":"Manrope"}
+]'>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1920,height=1080,initial-scale=1" />
+  <title>Kept — a little more aware of what stays</title>
+  <script src="assets/js/gsap.min.js"></script>
+  <style>
+    @font-face{font-family:Manrope;src:url('assets/fonts/manrope-latin-wght-normal.woff2') format('woff2');font-weight:200 800;font-style:normal;font-display:swap}
+    @font-face{font-family:DMMono;src:url('assets/fonts/dm-mono-latin-400-normal.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+    :root{--ground:#101713;--panel:#1a241e;--raised:#202b24;--ink:#e7eadf;--muted:#9ba69b;--rule:#303d34;--accent:#c3df91;--night:#0b100d;--display:Manrope,sans-serif;--mono:DMMono,monospace}
+    *{box-sizing:border-box}html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:var(--ground);font-family:var(--display);color:var(--ink)}
+    #root{position:relative;width:1920px;height:1080px;overflow:hidden;background:var(--ground)}
+    .clip{position:absolute;inset:0;width:1920px;height:1080px;overflow:hidden}
+    .mono{font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase}
+    .page{position:absolute;inset:52px 70px 50px;border-top:1px solid var(--rule);padding-top:30px}
+    .topbar{height:64px;border-bottom:1px solid var(--rule);display:flex;align-items:flex-start;justify-content:space-between;color:var(--muted);font-size:24px}
+    .brand{display:flex;align-items:center;gap:13px;color:var(--ink);font-weight:750;font-size:29px;letter-spacing:-.05em}.mark{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#142017;font-weight:800;font-size:20px}
+    .status{font:16px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:12px}.status i{width:11px;height:11px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 7px #c3df9120}
+    .theme{border:1px solid var(--rule);border-radius:5px;padding:12px 18px;font-size:18px;color:var(--ink)}
+    .hero{padding-top:47px}.eyebrow{font:16px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+    h1{font-size:76px;line-height:1;letter-spacing:-.07em;margin:15px 0 8px;font-weight:600}h1 .dot,.period{color:var(--accent)}
+    .deck{font-size:24px;color:var(--muted);margin:0}.library{margin-top:54px}
+    .section-line{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--rule);padding-bottom:20px}
+    h2{font-size:50px;letter-spacing:-.065em;font-weight:600;margin:8px 0 0;line-height:1}
+    .action{height:58px;padding:0 22px;border:1px solid #66755f;border-radius:6px;display:flex;align-items:center;gap:12px;color:var(--ink);font-size:19px}
+    .search{margin-top:24px;background:#18221c;border:1px solid var(--rule);border-radius:6px;height:56px;padding:0 18px;display:flex;align-items:center;gap:14px;color:var(--muted);font-size:19px;width:100%}.search-icon{font-size:23px}
+    .chips{display:flex;gap:12px;margin:17px 0 29px}.chip{border:1px solid var(--rule);border-radius:5px;padding:9px 15px;font-size:17px;color:var(--muted)}.chip.active{background:var(--panel);color:var(--ink);border-color:#66755f}
+    .records{border-top:1px solid var(--rule)}
+    .record{height:124px;display:grid;grid-template-columns:42px 100px 1fr 230px 30px;align-items:center;gap:20px;border-bottom:1px solid var(--rule);padding:0 20px 0 5px}
+    .record.selected{background:#1a251e;border-left:3px solid var(--accent);padding-left:2px}.index{font:16px var(--mono);color:var(--accent)}
+    .thumb{width:86px;height:94px;background:#202a24;border:1px solid #455449;border-radius:6px;display:grid;place-items:center;overflow:hidden}
+    .hoodie{width:60px;height:71px;position:relative;background:#404644;clip-path:polygon(27% 0,43% 8%,57% 8%,73% 0,100% 19%,84% 39%,77% 32%,79% 100%,21% 100%,23% 32%,16% 39%,0 19%);}
+    .hoodie:before{content:"";position:absolute;left:20px;top:2px;width:20px;height:18px;border:3px solid #69706b;border-radius:50% 50% 20% 20%;opacity:.8}
+    .record-name{font-size:25px;font-weight:650;letter-spacing:-.025em}.record-sub{font-size:19px;color:var(--muted);margin-top:7px}.record-age{text-align:right}.record-age span{display:block;font:14px var(--mono);color:var(--muted);letter-spacing:.1em}.record-age strong{display:block;font:20px var(--mono);margin-top:8px;font-weight:400}.arrow{font-size:29px;color:var(--accent)}
+    .demo-note{font:13px var(--mono);letter-spacing:.1em;color:#82907f;text-transform:uppercase}
+
+    /* Purchase timeline: the selected item and its real record structure stay together. */
+    .detail-layout{position:absolute;left:70px;right:70px;top:172px;bottom:66px;display:grid;grid-template-columns:.82fr 1.18fr;gap:48px}
+    .detail-left{padding-top:7px}.detail-left h1{font-size:69px;margin-top:20px}.detail-left .deck{max-width:650px;line-height:1.5}
+    .item-card{margin-top:35px;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:26px;display:flex;gap:24px;align-items:center}
+    .item-card .thumb{width:150px;height:170px;flex:none}.item-card .hoodie{transform:scale(1.55);background:#555b57}.item-card h3{font-size:33px;margin:0 0 7px;letter-spacing:-.04em}.item-card p{font-size:20px;color:var(--muted);margin:0}.item-card .demo-note{margin-top:18px}
+    .facts{margin-top:32px;display:flex;border-block:1px solid var(--rule);padding:17px 0}.fact{flex:1;padding:0 20px;border-right:1px solid var(--rule)}.fact:first-child{padding-left:0}.fact:last-child{border:0}.fact span{font:14px var(--mono);letter-spacing:.1em;color:var(--muted)}.fact strong{display:block;font:20px var(--mono);margin-top:11px;font-weight:400}
+    .purchase-panel{border:1px solid var(--rule);background:#131b16;border-radius:8px;padding:30px 34px;display:flex;flex-direction:column}
+    .panel-head{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--rule);padding-bottom:20px}.panel-head h2{font-size:42px}.count{font:15px var(--mono);color:var(--muted)}
+    .purchase-summary{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:23px 0 25px}
+    .purchase-box{background:#0e1511;border:1px solid var(--rule);border-radius:5px;padding:18px 20px}.purchase-box label{font:14px var(--mono);letter-spacing:.12em;color:var(--accent)}.purchase-box strong{display:block;font-size:37px;letter-spacing:-.04em;margin:7px 0}.purchase-box small{display:block;color:var(--muted);font-size:17px}.history{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--rule);padding-bottom:14px;margin-bottom:14px}.history h3{margin:6px 0 0;font-size:36px;letter-spacing:-.06em}.entries{display:flex;flex-direction:column;gap:0;flex:1}.entry{display:grid;grid-template-columns:24px 1fr 180px;gap:18px;padding:18px 0;border-bottom:1px solid var(--rule);align-items:center}.node{width:14px;height:14px;border:2px solid var(--accent);border-radius:50%;position:relative}.node:after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--accent)}.entry-title{font-size:22px;font-weight:650}.entry-sub{font-size:17px;color:var(--muted);margin-top:5px}.entry-date{text-align:right;font:16px var(--mono);color:var(--muted)}.entry-paid{text-align:right;font-size:23px;font-weight:650}.entry-paid small{display:block;color:var(--muted);font:14px var(--mono);margin-top:4px}
+    .manage{align-self:flex-start;margin-top:20px;border-top:1px solid var(--rule);padding-top:14px;color:var(--muted);font-size:16px}.manage b{font-weight:500;color:var(--ink);margin-left:10px}
+
+    /* Calendar and Routine appear as parts of the same small ledger. */
+    .calendar-layout{position:absolute;left:70px;right:70px;top:178px;bottom:70px;display:grid;grid-template-columns:1.25fr .75fr;gap:28px}
+    .calendar-card,.routine-card{border:1px solid var(--rule);border-radius:8px;background:var(--panel);padding:28px 32px}
+    .calendar-title{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--rule);padding-bottom:18px}.calendar-title h2{font-size:44px}.month{font:18px var(--mono);color:var(--muted)}.month b{font-size:24px;color:var(--ink);margin:0 10px}
+    .weekdays,.days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center}.weekdays{margin-top:18px;color:var(--muted);font:14px var(--mono);letter-spacing:.1em}.days{margin-top:10px;grid-auto-rows:102px}.day{padding:10px 5px;position:relative;color:#c5cbbf;font:19px var(--mono)}.day.muted{color:#68736b}.day.selected{background:#253127;border:1px solid #71845f;border-radius:5px;color:var(--ink)}.day.current{color:var(--accent)}
+    .day-mark{width:11px;height:11px;border-radius:50%;background:var(--accent);margin:10px auto 0;box-shadow:0 0 0 4px #c3df9120}.day-photo{width:47px;height:47px;border-radius:6px;margin:8px auto 0;background:#505752;color:#ddd;display:grid;place-items:center;font:13px var(--mono);letter-spacing:.1em}
+    .selected-day{margin-top:20px;border-top:1px solid var(--rule);padding-top:17px;display:grid;grid-template-columns:64px 1fr 160px;gap:14px;align-items:center}.selected-day .day-photo{width:60px;height:60px;margin:0}.selected-day strong{font-size:20px}.selected-day small{display:block;color:var(--muted);margin-top:4px;font-size:15px}.selected-day time{text-align:right;color:var(--muted);font:14px var(--mono)}
+    .routine-card .eyebrow{margin-top:0}.routine-card h2{font-size:43px;margin:8px 0 22px}.routine-slot{border-top:1px solid var(--rule);padding:19px 0}.routine-slot h3{font:15px var(--mono);letter-spacing:.12em;color:var(--accent);margin:0 0 14px}.routine-item{display:flex;align-items:center;gap:14px;padding:11px 0}.routine-item .mini{width:42px;height:48px;background:#202a24;border:1px solid var(--rule);border-radius:5px;display:grid;place-items:center;color:var(--accent);font-size:20px}.routine-item strong{font-size:20px}.routine-item small{display:block;font-size:14px;color:var(--muted);margin-top:3px}.routine-note{font-size:17px;color:var(--muted);line-height:1.5;margin-top:19px}
+    .final{background:var(--ground);display:grid;place-items:center}.final-lockup{display:flex;align-items:center;gap:22px}.final-lockup .mark{width:72px;height:72px;font-size:34px}.final-lockup strong{font-size:61px;letter-spacing:-.07em}.final-tag{position:absolute;top:590px;text-align:center;width:100%;font-size:28px;color:var(--muted)}.final-tag .accent{color:var(--accent)}.final-url{position:absolute;bottom:156px;width:100%;text-align:center;font:15px var(--mono);letter-spacing:.17em;color:#768278;text-transform:uppercase}
+    .scene-title{position:absolute;left:84px;top:82px;font:15px var(--mono);letter-spacing:.14em;color:var(--muted);text-transform:uppercase}.scene-title span{color:var(--accent)}
+    .receipt-scene{background:#f4f5ef;color:#17241e}.receipt-paper{position:absolute;left:600px;top:166px;width:720px;height:748px;background:#fcfcf8;border:1px solid #d9ded5;box-shadow:0 22px 70px #1114;padding:64px 76px}.receipt-paper:before,.receipt-paper:after{content:"";position:absolute;left:0;width:100%;height:12px;background:radial-gradient(circle at 6px 0,transparent 6px,#fcfcf8 6.5px) 0 0/12px 12px repeat-x}.receipt-paper:before{top:-6px}.receipt-paper:after{bottom:-6px;transform:rotate(180deg)}.receipt-brand{font:15px var(--mono);letter-spacing:.18em;color:#60695f}.receipt-rule{height:1px;background:#d9ded5;margin:25px 0}.receipt-row{display:flex;justify-content:space-between;font:17px var(--mono);color:#60695f;margin:16px 0}.receipt-main{font-size:34px;letter-spacing:-.04em;font-weight:600;margin-top:27px}.receipt-paid{font-size:54px;font-weight:650;letter-spacing:-.05em}.receipt-foot{font-size:16px;color:#60695f;margin-top:30px}.receipt-copy{position:absolute;left:1360px;top:342px;width:400px}.receipt-copy p{font-size:18px;color:#60695f;margin:0 0 12px}.receipt-copy h2{font-size:64px;line-height:1.04;letter-spacing:-.07em;margin:0;font-weight:600}.receipt-copy .question{color:#526b2e}
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="main" data-start="0" data-duration="20" data-width="1920" data-height="1080">
+    <section id="scene-receipt" class="clip receipt-scene" data-start="0" data-duration="3.5" data-track-index="0">
+      <div class="receipt-paper" id="receipt-paper">
+        <div class="receipt-brand">KEPT · A PERSONAL LEDGER</div><div class="receipt-rule"></div>
+        <div class="receipt-row"><span>ITEM</span><span>1</span></div><div class="receipt-main">Everyday hoodie</div>
+        <div class="receipt-rule"></div><div class="receipt-row"><span>WHAT YOU PAID</span><span>₹680.00</span></div><div class="receipt-row"><span>DATE</span><span>18 OCT</span></div>
+        <div class="receipt-rule"></div><div class="receipt-paid">PAID.</div><div class="receipt-foot">A DEMO RECORD · NOT A REAL PURCHASE</div>
+      </div>
+      <div class="receipt-copy" id="receipt-copy"><p class="mono">AFTER CHECKOUT</p><h2>Paid.<br><span class="question">And then?</span></h2></div>
+    </section>
+
+    <section id="scene-library" class="clip" data-start="3.5" data-duration="4" data-track-index="0">
+      <div class="page" id="library-ui">
+        <div class="topbar"><div class="brand"><span class="mark">k.</span><span>kept</span></div><div class="status"><i></i>YOUR PERSONAL LEDGER</div><div class="theme">◐&nbsp; Dark</div></div>
+        <div class="hero"><p class="eyebrow">A LITTLE MORE AWARE OF WHAT YOU OWN</p><h1>Keep what <span class="dot">matters.</span></h1><p class="deck">Remember what you bought, how it’s holding up, and when it needs care.</p><p class="demo-note" style="margin-top:14px">Illustrative demo records</p></div>
+        <div class="library">
+          <div class="section-line"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Your things<span class="period">.</span></h2></div><div class="action"><span style="color:var(--accent);font-size:23px">＋</span>Add a thing</div></div>
+          <div class="search"><span class="search-icon">⌕</span>Find something…</div>
+          <div class="chips"><span class="chip active">All things</span><span class="chip">Clothes</span><span class="chip">Skincare</span><span class="chip">Tech</span></div>
+          <div class="records">
+            <div class="record selected" id="library-row"><div class="index">01</div><div class="thumb"><div class="hoodie"></div></div><div><div class="record-name">Charcoal hoodie</div><div class="record-sub">Northline · Clothes · Hoodie</div></div><div class="record-age"><span>OWNED</span><strong>2 months</strong></div><div class="arrow">→</div></div>
+            <div class="record"><div class="index">02</div><div class="thumb" style="color:var(--accent);font-size:36px">W</div><div><div class="record-name">Everyday watch</div><div class="record-sub">Accessories · Watch</div></div><div class="record-age"><span>OWNED</span><strong>6 months</strong></div><div class="arrow">→</div></div>
+            <div class="record"><div class="index">03</div><div class="thumb" style="color:var(--accent);font-size:36px">S</div><div><div class="record-name">Daily sunscreen</div><div class="record-sub">Skincare · Sunscreen</div></div><div class="record-age"><span>OWNED</span><strong>4 months</strong></div><div class="arrow">→</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="scene-history" class="clip" data-start="7.5" data-duration="5" data-track-index="0">
+      <div class="topbar" style="position:absolute;left:70px;right:70px;top:52px"><div class="brand"><span class="mark">k.</span><span>kept</span></div><div class="status"><i></i>YOUR PERSONAL LEDGER</div><div class="theme">◐&nbsp; Dark</div></div>
+      <div class="detail-layout">
+        <div class="detail-left" id="detail-left"><p class="eyebrow">OBJECT RECORD / 01</p><h1>Charcoal<br>hoodie<span class="period">.</span></h1><p class="deck">A purchase becomes a record of how the thing stays with you.</p>
+          <div class="item-card"><div class="thumb"><div class="hoodie"></div></div><div><p class="eyebrow">NORTHLINE · CLOTHES</p><h3>Relaxed fit</h3><p>Charcoal · all-season</p><div class="demo-note">Illustrative example</div></div></div>
+          <div class="facts"><div class="fact"><span>WITH YOU</span><strong>2 months</strong></div><div class="fact"><span>BOUGHT</span><strong>2 times</strong></div><div class="fact"><span>LAST SERVICE</span><strong>—</strong></div></div>
+        </div>
+        <div class="purchase-panel" id="purchase-panel">
+          <div class="panel-head"><div><p class="eyebrow">WHAT YOU PAID</p><h2>Purchase history<span class="period">.</span></h2></div><span class="count">02 ENTRIES</span></div>
+          <div class="purchase-summary"><div class="purchase-box"><label>LATEST</label><strong>₹680.00</strong><small>1 item · 18 Oct 2026</small><small>₹680.00 each</small></div><div class="purchase-box"><label>PREVIOUS</label><strong>₹1,200.00</strong><small>2 items · 14 Aug 2026</small><small>₹600.00 each</small></div></div>
+          <div class="history"><div><p class="eyebrow">HISTORY</p><h3>Timeline<span class="period">.</span></h3></div><span class="count">DEMO RECORD</span></div>
+          <div class="entries">
+            <div class="entry" id="entry-one"><span class="node"></span><div><div class="entry-title">Bought again</div><div class="entry-sub">1 item · relaxed fit · charcoal</div></div><div><div class="entry-date">18 OCT 2026</div><div class="entry-paid">₹680.00<small>total paid</small></div></div></div>
+            <div class="entry" id="entry-two"><span class="node"></span><div><div class="entry-title">Bought</div><div class="entry-sub">2 items · relaxed fit · charcoal</div></div><div><div class="entry-date">14 AUG 2026</div><div class="entry-paid">₹1,200.00<small>total paid</small></div></div></div>
+            <div class="manage">Manage <b>Product details · entries · archive</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="scene-calendar" class="clip" data-start="12.5" data-duration="4" data-track-index="0">
+      <div class="topbar" style="position:absolute;left:70px;right:70px;top:52px"><div class="brand"><span class="mark">k.</span><span>kept</span></div><div class="status"><i></i>YOUR PERSONAL LEDGER</div><div class="theme">◐&nbsp; Dark</div></div>
+      <div class="calendar-layout" id="calendar-layout">
+        <div class="calendar-card"><div class="calendar-title"><div><p class="eyebrow">YOUR CALENDAR</p><h2>October<span class="period">.</span></h2></div><div class="month">‹ <b>2026</b> ›</div></div>
+          <div class="weekdays"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span></div>
+          <div class="days">
+            <div class="day muted">28</div><div class="day muted">29</div><div class="day muted">30</div><div class="day current">1</div><div class="day">2</div><div class="day">3</div><div class="day">4</div>
+            <div class="day">5</div><div class="day">6</div><div class="day">7</div><div class="day">8</div><div class="day">9</div><div class="day">10</div><div class="day">11</div>
+            <div class="day">12</div><div class="day">13</div><div class="day">14<div class="day-mark"></div></div><div class="day">15</div><div class="day">16</div><div class="day">17</div><div class="day selected" id="selected-date">18<div class="day-photo">H</div></div>
+            <div class="day">19</div><div class="day">20</div><div class="day">21</div><div class="day">22<div class="day-mark"></div></div><div class="day">23</div><div class="day">24</div><div class="day">25</div>
+            <div class="day">26</div><div class="day">27</div><div class="day">28</div><div class="day">29</div><div class="day">30</div><div class="day">31</div><div class="day muted">1</div>
+          </div>
+          <div class="selected-day"><div class="day-photo">H</div><div><strong>Charcoal hoodie</strong><small>Purchase · 1 item · ₹680.00</small></div><time>18 OCT 2026</time></div>
+        </div>
+        <div class="routine-card"><p class="eyebrow">YOUR DAILY PRACTICE</p><h2>Routine<span class="period">.</span></h2>
+          <div class="routine-slot"><h3>MORNING</h3><div class="routine-item"><span class="mini">C</span><span><strong>Gentle cleanser</strong><small>Using for 8 weeks</small></span></div><div class="routine-item"><span class="mini">S</span><span><strong>Daily sunscreen</strong><small>Using for 8 weeks</small></span></div></div>
+          <div class="routine-slot"><h3>NIGHT</h3><div class="routine-item"><span class="mini">C</span><span><strong>Gentle cleanser</strong><small>Using for 8 weeks</small></span></div></div>
+          <p class="routine-note">Past use stays in the timeline.<br>Made for real routines, one day at a time.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="scene-end" class="clip final" data-start="16.5" data-duration="3.5" data-track-index="0">
+      <div class="scene-title" id="end-label">A LITTLE MORE AWARE OF WHAT YOU OWN</div>
+      <div class="final-lockup" id="end-lockup"><span class="mark">k.</span><strong>kept<span class="period">.</span></strong></div>
+      <p class="final-tag" id="end-tag">Remember what you bought, how it’s holding up,<br>and when it needs care.</p>
+      <div class="final-url" id="end-caption">KEEP WHAT MATTERS</div>
+    </section>
+
+    <audio id="music" class="clip" data-start="0" data-duration="20" data-volume="0.3" data-fade-in="0.8" data-fade-out="1.2" src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"></audio>
+    <audio id="purchase-accent" class="clip" data-start="8.74" data-duration="0.2" data-volume="0.65" src="assets/sfx/impact/impactSoft_medium_001.ogg"></audio>
+    <audio id="calendar-click" class="clip" data-start="13.11" data-duration="0.1" data-volume="0.5" src="assets/sfx/interface/click_003.ogg"></audio>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#receipt-paper", { y: 55, opacity: 0, rotation: -1.3 }, { y: 0, opacity: 1, rotation: 0, duration: .72, ease: "power4.out" }, .12);
+      tl.fromTo("#receipt-copy", { x: 40, opacity: 0 }, { x: 0, opacity: 1, duration: .58, ease: "power3.out" }, .55);
+      tl.fromTo("#library-ui", { y: 35, opacity: 0 }, { y: 0, opacity: 1, duration: .66, ease: "power3.out" }, 3.55);
+      tl.fromTo("#library-row", { x: -35, opacity: 0 }, { x: 0, opacity: 1, duration: .5, ease: "power4.out" }, 5.4);
+      tl.fromTo("#detail-left", { x: -24, opacity: 0 }, { x: 0, opacity: 1, duration: .55, ease: "power3.out" }, 7.58);
+      tl.fromTo("#purchase-panel", { x: 55, opacity: 0 }, { x: 0, opacity: 1, duration: .65, ease: "power3.out" }, 7.72);
+      tl.fromTo("#entry-one", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: .45, ease: "power4.out" }, 8.4);
+      // beat-locked: second purchase lands at the bundled music cue at 8.74s.
+      tl.fromTo("#entry-two", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: .42, ease: "power4.out" }, 8.74);
+      tl.fromTo("#calendar-layout", { scale: .975, opacity: 0 }, { scale: 1, opacity: 1, duration: .68, ease: "power3.out" }, 12.56);
+      // beat-locked: the selected calendar date opens at the 13.11s cue.
+      tl.fromTo("#selected-date", { backgroundColor: "#1a241e" }, { backgroundColor: "#253127", duration: .22, ease: "power1.out" }, 13.11);
+      tl.fromTo("#end-lockup", { y: 22, opacity: 0, scale: .96 }, { y: 0, opacity: 1, scale: 1, duration: .74, ease: "power3.out" }, 16.72);
+      tl.fromTo("#end-tag", { opacity: 0 }, { opacity: 1, duration: .42, ease: "power1.out" }, 17.2);
+      // beat-locked: the finished mark settles just after the 17.47s music cue.
+      tl.fromTo("#end-caption", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: .36, ease: "power2.out" }, 17.5);
+      window.__timelines.main = tl;
+      tl.seek(0);
+    </script>
+  </div>
+</body>
+</html>

@@ -25,6 +25,35 @@ type ProfileMascot = typeof PROFILE_MASCOTS[number];
 type ProductLookup = { title?: string; imageUrl?: string; amount?: number; currency?: string; fetchedAt?: string; storeName?: string; source?: "flipkart-api" | "product-page"; productId?: string; variant?: string; mrp?: number; availability?: string };
 type AddProductPreview = ProductLookup;
 
+type PendingItemSnapshot = { items: TrackedItem[]; deletedIds: string[] };
+
+function pendingItemsKey(userId: string) { return `kept-pending-items-v1-${userId}`; }
+
+function mergePendingItems(cloudItems: TrackedItem[], pending: PendingItemSnapshot): TrackedItem[] {
+  const deleted = new Set(pending.deletedIds);
+  const localById = new Map(pending.items.map((item) => [item.id, item]));
+  const merged = cloudItems.filter((item) => !deleted.has(item.id)).map((cloudItem) => {
+    const localItem = localById.get(cloudItem.id);
+    if (!localItem) return cloudItem;
+    const events = new Map(cloudItem.events.map((entry) => [entry.id, entry]));
+    localItem.events.forEach((entry) => events.set(entry.id, entry));
+    localById.delete(cloudItem.id);
+    return {
+      ...cloudItem,
+      ...localItem,
+      productPhoto: localItem.productPhotoPath && localItem.productPhotoPath === cloudItem.productPhotoPath ? cloudItem.productPhoto : localItem.productPhoto,
+      events: [...events.values()],
+    };
+  });
+  for (const item of localById.values()) if (!deleted.has(item.id)) merged.push(item);
+  return merged;
+}
+
+function localDateString() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function validMascot(value: unknown): value is ProfileMascot {
   return typeof value === "string" && PROFILE_MASCOTS.includes(value as ProfileMascot);
 }
@@ -350,9 +379,20 @@ export default function Home() {
         try {
           const [cloudItems, cloudRoutine] = await Promise.all([loadTrackerItems(supabase, userId), loadRoutineData(supabase, userId)]);
           if (!active) return;
+          let initialItems = cloudItems;
+          const pendingKey = pendingItemsKey(userId);
+          try {
+            const rawPending = localStorage.getItem(pendingKey);
+            if (rawPending) {
+              const parsedPending: unknown = JSON.parse(rawPending);
+              if (parsedPending && typeof parsedPending === "object" && "items" in parsedPending && validItems(parsedPending.items) && Array.isArray(parsedPending.deletedIds) && parsedPending.deletedIds.every((id: unknown) => typeof id === "string")) {
+                initialItems = mergePendingItems(cloudItems, parsedPending as PendingItemSnapshot);
+              }
+            }
+          } catch { /* Use the cloud copy when no recoverable local save exists. */ }
           lastSyncedItems.current = cloudItems;
           lastSyncedRoutine.current = cloudRoutine;
-          setItems(cloudItems);
+          setItems(initialItems);
           setRoutineData(cloudRoutine);
           setRoutineLoaded(true);
           setCloudReady(true);
@@ -457,10 +497,29 @@ export default function Home() {
     const next = items;
     lastSyncedItems.current = next;
     const supabase = createClient();
+    const pendingKey = pendingItemsKey(user.id);
+    let deletedIds = new Set<string>();
+    try {
+      const existingRaw = localStorage.getItem(pendingKey);
+      const existing = existingRaw ? JSON.parse(existingRaw) as Partial<PendingItemSnapshot> : null;
+      if (Array.isArray(existing?.deletedIds)) existing.deletedIds.forEach((id) => { if (typeof id === "string") deletedIds.add(id); });
+    } catch { /* Start a fresh pending snapshot. */ }
+    previous.filter((item) => !next.some((entry) => entry.id === item.id)).forEach((item) => deletedIds.add(item.id));
+    next.forEach((item) => deletedIds.delete(item.id));
+    const pendingSnapshot: PendingItemSnapshot = { items: next, deletedIds: [...deletedIds] };
+    try { localStorage.setItem(pendingKey, JSON.stringify(pendingSnapshot)); }
+    catch { setNotice("Your account save is still syncing. Keep this page open until it finishes."); }
     syncQueue.current = syncQueue.current.then(async () => {
       const photoPaths = await syncTrackerItems(supabase, user.id, previous, next);
       lastSyncedItems.current = next.map((item) => photoPaths.has(item.id) ? { ...item, productPhotoPath: photoPaths.get(item.id) } : item);
       setItems((current) => current.map((item) => photoPaths.has(item.id) ? { ...item, productPhotoPath: photoPaths.get(item.id) } : item));
+      try {
+        const currentPending = localStorage.getItem(pendingKey);
+        if (currentPending) {
+          const parsed = JSON.parse(currentPending) as Partial<PendingItemSnapshot>;
+          if (JSON.stringify(parsed.items) === JSON.stringify(next)) localStorage.removeItem(pendingKey);
+        }
+      } catch { /* The cloud save succeeded; an old recovery copy can safely remain. */ }
     }).catch((error: unknown) => {
       lastSyncedItems.current = previous;
       setNotice(error instanceof Error ? `Could not save to your account: ${error.message}` : "Could not save to your account. Try again.");
@@ -713,8 +772,8 @@ export default function Home() {
         setFormError("Choose the product you bought again.");
         return;
       }
-      const date = String(data.get("date") ?? "");
       const service = isServiceType(repeatItem.itemType);
+      const date = String(data.get("date") ?? "") || (service ? localDateString() : "");
       const amountValue = String(data.get("amount") ?? "").trim();
       const amount = amountValue ? Number(amountValue) : undefined;
       if (amountValue && (!Number.isFinite(amount) || (amount ?? -1) < 0)) {
@@ -771,7 +830,7 @@ export default function Home() {
         return;
       }
     }
-    const date = String(data.get("date") ?? "");
+    const date = String(data.get("date") ?? "") || (service ? localDateString() : "");
     const amountString = String(data.get("amount") ?? "").trim();
     const amount = amountString ? Number(amountString) : undefined;
     const currency = String(data.get("currency") || "INR");
@@ -841,7 +900,7 @@ export default function Home() {
     event.preventDefault();
     if (!selectedItem) return;
     const data = new FormData(event.currentTarget);
-    const date = String(data.get("date") ?? "");
+    const date = String(data.get("date") ?? "") || (eventKind === "service" ? localDateString() : "");
     const amountString = String(data.get("amount") ?? "").trim();
     const amount = amountString ? Number(amountString) : undefined;
     const note = String(data.get("note") ?? "").trim();
@@ -1135,7 +1194,7 @@ export default function Home() {
           <label className="field"><span>Photo link <b>OPTIONAL</b></span><input type="url" value={addImageUrl} onChange={(event) => setAddImageUrl(event.target.value)} placeholder="https://…" /></label>
         </div></details> : null}
         {!editingItem ? <><div className="form-subheading"><span>{addIsService ? "FIRST SERVICE" : "FIRST PURCHASE"}</span><span>OPTIONAL</span></div>
-        <div className="field-pair"><label className="field"><span>{addIsService ? "Date of service" : "Date"}</span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label><label className="field"><span>{addIsService ? "Service cost" : "Total you paid"}</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label></div>
+        <div className="field-pair"><label className="field"><span>{addIsService ? "Date of service" : "Date"}</span><input type="date" name="date" max={localDateString()} defaultValue={addIsService ? localDateString() : ""} /></label><label className="field"><span>{addIsService ? "Service cost" : "Total you paid"}</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label></div>
         {addIsService ? <label className="field"><span>Repeat interval <b>OPTIONAL</b></span><input value={addSpecifications.repeat_interval ?? ""} onChange={(event) => setAddSpecifications((current) => ({ ...current, repeat_interval: event.target.value }))} maxLength={80} placeholder="e.g. every 8–10 weeks" /></label> : null}
         {!addIsService && addCategory !== "Clothes" ? <label className="field"><span>Quantity</span><input name="quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" defaultValue="1" /></label> : null}
         {!addIsService && addAttributeFields.purchase.length ? <div className="attribute-fields purchase-attribute-fields">{addAttributeFields.purchase.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input maxLength={120} value={addPurchaseAttributes[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setAddPurchaseAttributes((current) => ({ ...current, [field.key]: event.target.value }))} /></label>)}</div> : null}</> : null}
@@ -1144,7 +1203,7 @@ export default function Home() {
         <p className="dialog-intro">Choose the same product to continue its history and reuse its photo.</p>
         <label className="field"><span>{repeatItem && isServiceType(repeatItem.itemType) ? "Find a service" : "Find a product or service"}</span><input value={repeatSearch} onChange={(event) => { setRepeatSearch(event.target.value); setRepeatItemId(""); }} placeholder="Search name or brand" autoComplete="off" /></label>
         {repeatItem ? <div className="repeat-selected-card">{repeatItem.productPhoto || repeatItem.currentProduct?.imageUrl || fallbackItemImage(repeatItem) ? <img src={repeatItem.productPhoto || repeatItem.currentProduct?.imageUrl || fallbackItemImage(repeatItem)} alt="" referrerPolicy="no-referrer" /> : <span className="add-preview-placeholder" aria-hidden="true">{repeatItem.name.charAt(0).toUpperCase()}</span>}<span><strong>{repeatItem.name}</strong><small>{[repeatItem.brand, repeatItem.itemType, repeatItem.relatedGroup].filter(Boolean).join(" · ")}</small>{repeatLastEvent ? <small>Last {isServiceType(repeatItem.itemType) ? "service" : "paid"}: {formatDate(repeatLastEvent.date)}{repeatLastEvent.amount !== undefined ? ` · ${formatMoney(repeatLastEvent.amount, repeatLastEvent.currency)}` : ""}</small> : <small>{isServiceType(repeatItem.itemType) ? "No service recorded yet" : "No purchase recorded yet"}</small>}</span><button type="button" className="text-button" onClick={() => { setRepeatItemId(""); setRepeatSearch(""); }}>Change</button></div> : <div className="repeat-item-picker" role="listbox" aria-label="Saved products">{repeatCandidates.map((item) => { const photo = item.productPhoto || item.currentProduct?.imageUrl || fallbackItemImage(item); const service = isServiceType(item.itemType); const last = lastOfKind(item, service ? "service" : "purchase"); return <button type="button" role="option" aria-selected={repeatItemId === item.id} className="repeat-item-option" key={item.id} onClick={() => { setRepeatItemId(item.id); setRepeatSearch(item.name); setFormError(""); }}><span className="repeat-item-photo">{photo ? <img src={photo} alt="" referrerPolicy="no-referrer" /> : <i>{item.name.charAt(0).toUpperCase()}</i>}</span><span><strong>{item.name}</strong><small>{[item.brand, item.itemType].filter(Boolean).join(" · ") || item.category || (service ? "Service" : "Product")}</small><small>{last?.amount !== undefined ? `Last ${service ? "service cost" : "paid"} ${formatMoney(last.amount, last.currency)}${!service && (last.quantity ?? 1) > 1 ? ` for ${last.quantity} units` : ""}` : service ? "No service recorded yet" : "No purchase recorded yet"}</small></span><span aria-hidden="true">→</span></button>; })}{repeatCandidates.length === 0 ? <p className="repeat-empty">No saved product or service matches. Choose New product or service to add a different record.</p> : null}</div>}
-        {repeatItem ? <><div className="form-subheading"><span>{isServiceType(repeatItem.itemType) ? "SERVICE AGAIN" : "THIS PURCHASE"}</span><span>OPTIONAL</span></div><div className="field-pair"><label className="field"><span>{isServiceType(repeatItem.itemType) ? "Date of service" : "Date"}</span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} /></label><label className="field"><span>{isServiceType(repeatItem.itemType) ? "Service cost" : "Total you paid"}</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label></div>
+        {repeatItem ? <><div className="form-subheading"><span>{isServiceType(repeatItem.itemType) ? "SERVICE AGAIN" : "THIS PURCHASE"}</span><span>OPTIONAL</span></div><div className="field-pair"><label className="field"><span>{isServiceType(repeatItem.itemType) ? "Date of service" : "Date"}</span><input type="date" name="date" max={localDateString()} defaultValue={isServiceType(repeatItem.itemType) ? localDateString() : ""} /></label><label className="field"><span>{isServiceType(repeatItem.itemType) ? "Service cost" : "Total you paid"}</span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" /><select name="currency" aria-label="Currency" defaultValue="INR">{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div></label></div>
           {!isServiceType(repeatItem.itemType) && repeatItem.category !== "Clothes" ? <label className="field"><span>Quantity</span><input name="repeat_quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" defaultValue="1" /></label> : !isServiceType(repeatItem.itemType) ? <small className="field-hint">For clothes, add one piece at a time so its size and color stay with it.</small> : null}
           {!isServiceType(repeatItem.itemType) ? detailFields(repeatItem.category, repeatItem.itemType).purchase.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input name={`repeat-attribute-${field.key}`} maxLength={120} placeholder={field.placeholder} /></label>) : null}
           {!isServiceType(repeatItem.itemType) && repeatItem.category !== "Clothes" ? <label className="field"><span>Size, flavor, or option <b>OPTIONAL</b></span><input name="repeat_variant" maxLength={120} placeholder="e.g. 100 ml bottle, oats formula" /></label> : null}
@@ -1159,7 +1218,7 @@ export default function Home() {
     <div className="dialog-top"><div><p className="eyebrow">{selectedItem.name} / {editingEventId ? "EDIT HISTORY" : "ADD TO THE STORY"}</p><h2 id="event-title">{editingEventId ? "Edit history" : eventKind === "purchase" ? "A purchase" : eventKind === "service" ? "Some upkeep" : eventKind === "opened" ? "Container opened" : eventKind === "finished" ? "Container finished" : "A use note"}<span className="period">.</span></h2></div><button ref={formCloseButton} className="icon-button" onClick={() => { setModal(null); setEditingEventId(null); }} aria-label="Close history form"><Icon name="close" /></button></div>
     <p className="dialog-intro">Write down what you remember. You can leave any field blank.</p>
     <form onSubmit={saveEvent} className="entry-form" autoComplete="off" noValidate>
-      <label className="field"><span>Date <b>OPTIONAL</b></span><input type="date" name="date" max={new Date().toISOString().slice(0, 10)} defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.date ?? ""} /></label>
+      <label className="field"><span>Date <b>OPTIONAL</b></span><input type="date" name="date" max={localDateString()} defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.date ?? (eventKind === "service" && !editingEventId ? localDateString() : "")} /></label>
       {eventKind === "purchase" || eventKind === "service" ? <label className="field"><span>{eventKind === "purchase" ? selectedItem.category === "Clothes" ? "Paid for this piece" : "Total you paid" : "Service cost"} <b>OPTIONAL</b></span><div className="price-input"><input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="—" defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.amount ?? ""} /><select name="currency" aria-label="Currency" defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.currency ?? "INR"}>{CURRENCIES.map((value) => <option key={value}>{value}</option>)}</select></div>{eventKind === "purchase" ? <small className="field-hint">{selectedItem.category === "Clothes" ? "Log one garment per entry, including its own price and size." : "Enter the total for these units after discounts, card offers, or bundles."}</small> : null}</label> : null}
       {eventKind === "purchase" && selectedPurchaseFields.length ? <div className="attribute-fields purchase-attribute-fields">{selectedPurchaseFields.map((field) => <label className="field" key={field.key}><span>{field.label} <b>OPTIONAL</b></span><input name={`purchase-attribute-${field.key}`} maxLength={120} placeholder={field.placeholder} defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.attributes?.[field.key] ?? ""} /></label>)}</div> : null}
       {eventKind === "purchase" && selectedItem.category !== "Clothes" ? <div className="field-pair"><label className="field"><span>Quantity</span><input name="quantity" type="number" min="1" max="10000" step="1" inputMode="numeric" defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.quantity ?? 1} /></label><label className="field"><span>Variant <b>OPTIONAL</b></span>{selectedItem.variants?.length ? <select name="variant" defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.variant ?? ""}><option value="">Choose if useful</option>{selectedItem.variants.map((variant) => <option key={variant.id}>{variant.name}</option>)}</select> : <input name="variant" maxLength={120} placeholder="e.g. 100g, medium, black" defaultValue={selectedItem.events.find((entry) => entry.id === editingEventId)?.variant ?? ""} />}</label></div> : null}
