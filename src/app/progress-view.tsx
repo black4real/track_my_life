@@ -1,0 +1,288 @@
+"use client";
+
+/* Private progress photos use signed Supabase URLs; show the original framing for comparison. */
+/* eslint-disable @next/next/no-img-element */
+
+import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { formatDate, makeId, ProgressCheckIn, ProgressData, ProgressPhoto, ProgressProduct, ProgressTrack, RoutineData, TrackedItem } from "@/lib/tracker";
+
+type Props = { data: ProgressData; onChange: (data: ProgressData) => void; items: TrackedItem[]; routine: RoutineData };
+type ProgressTab = "skin" | "supplement";
+
+function localToday() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dayNumber(date: string, start: string) {
+  const a = new Date(`${start}T12:00:00`).getTime();
+  const b = new Date(`${date}T12:00:00`).getTime();
+  return Math.max(1, Math.floor((b - a) / 86_400_000) + 1);
+}
+
+function daysBetween(from: string, to: string) {
+  return Math.max(0, Math.floor((new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime()) / 86_400_000));
+}
+
+function orderedPhotos(track: ProgressTrack) {
+  return [...track.photos].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+}
+
+function trackStart(track: ProgressTrack) {
+  return track.kind === "skin"
+    ? orderedPhotos(track)[0]?.date
+    : track.startedOn || [...track.checkIns.map((entry) => entry.date), ...track.photos.map((photo) => photo.date)].sort()[0];
+}
+
+function linkedPhoto(item?: TrackedItem) { return item?.productPhoto || item?.currentProduct?.imageUrl; }
+
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("That photo could not be opened."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("This photo format is not supported. Choose a JPG, PNG, or WebP."));
+      image.onload = () => {
+        const scale = Math.min(1, 2200 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) { reject(new Error("The photo editor is unavailable.")); return; }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function ProductChooser({ items, routine, onPick, onCustom }: { items: TrackedItem[]; routine: RoutineData; onPick: (product: ProgressProduct) => void; onCustom: () => void }) {
+  const routineProducts = routine.products;
+  const choices = useMemo<Array<{ id: string; name: string; brand?: string; image?: string; linkedItemId?: string; linkedRoutineProductId?: string }>>(() => [
+    ...items.filter((item) => !item.archivedAt).map((item) => ({ id: `library:${item.id}`, name: item.name, brand: item.brand, image: linkedPhoto(item), linkedItemId: item.id })),
+    ...routineProducts.map((product) => ({ id: `routine:${product.id}`, name: product.name, brand: product.brand, image: product.photo, linkedRoutineProductId: product.id })),
+  ].filter((choice, index, all) => all.findIndex((entry) => entry.name.toLowerCase() === choice.name.toLowerCase() && (entry.brand ?? "").toLowerCase() === (choice.brand ?? "").toLowerCase()) === index), [items, routineProducts]);
+  return <div className="progress-product-choices">
+    {choices.length ? <div className="progress-product-choice-grid">{choices.map((choice) => <button type="button" className="progress-product-choice" key={choice.id} onClick={() => onPick({ id: makeId(), name: choice.name, brand: choice.brand, linkedItemId: choice.linkedItemId, linkedRoutineProductId: choice.linkedRoutineProductId, createdAt: new Date().toISOString() })}>
+      <span className="progress-product-choice-image">{choice.image ? <img src={choice.image} alt="" /> : choice.name.slice(0, 1).toUpperCase()}</span><span><strong>{choice.name}</strong><small>{choice.brand || (choice.linkedItemId ? "From Library" : "From Routine")}</small></span><span aria-hidden="true">＋</span>
+    </button>)}</div> : <p className="progress-empty">Your Library and Routine have no products yet. Add one by name below.</p>}
+    <button type="button" className="text-button progress-custom-link" onClick={onCustom}>＋ Add a custom product</button>
+  </div>;
+}
+
+export function ProgressView({ data, onChange, items, routine }: Props) {
+  const [tab, setTab] = useState<ProgressTab>("skin");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showTrackForm, setShowTrackForm] = useState(false);
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [showPhotoForm, setShowPhotoForm] = useState(false);
+  const [customProductForm, setCustomProductForm] = useState(false);
+  const [photoData, setPhotoData] = useState("");
+  const [photoError, setPhotoError] = useState("");
+  const [photoDate, setPhotoDate] = useState(localToday());
+  const [photoNote, setPhotoNote] = useState("");
+  const [photoCounts, setPhotoCounts] = useState<Record<string, string>>({});
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [feelingNotes, setFeelingNotes] = useState<Record<string, string>>({});
+  const [firstProductSource, setFirstProductSource] = useState("custom");
+  const [showFirstProductPicker, setShowFirstProductPicker] = useState(false);
+
+  const visibleTracks = data.tracks.filter((track) => track.kind === tab);
+  const selected = visibleTracks.find((track) => track.id === selectedId) ?? null;
+  const activeTracks = visibleTracks.filter((track) => track.status === "active");
+  const pastTracks = visibleTracks.filter((track) => track.status === "completed");
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const routineById = new Map(routine.products.map((product) => [product.id, product]));
+
+  function changeTrack(trackId: string, update: (track: ProgressTrack) => ProgressTrack) {
+    onChange({ tracks: data.tracks.map((track) => track.id === trackId ? update(track) : track) });
+  }
+
+  function photoForProduct(product: ProgressProduct) {
+    return linkedPhoto(product.linkedItemId ? itemById.get(product.linkedItemId) : undefined) || routineById.get(product.linkedRoutineProductId ?? "")?.photo;
+  }
+
+  function newTrack(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("trackName") ?? "").trim();
+    if (!name) return;
+    const now = new Date().toISOString();
+    const id = makeId();
+    if (tab === "skin") {
+      const first = newProductFromForm(new FormData(event.currentTarget), now);
+      const areas = String(form.get("areas") ?? "").split(",").map((area) => area.trim()).filter(Boolean).slice(0, 8);
+      const track: ProgressTrack = { id, kind: "skin", name, areas, status: "active", createdAt: now, products: first ? [first] : [], photos: [], checkIns: [] };
+      onChange({ tracks: [track, ...data.tracks] });
+      setSelectedId(id);
+    } else {
+      const startedOn = String(form.get("startedOn") ?? "");
+      const product: ProgressProduct = { id: makeId(), name, brand: String(form.get("brand") ?? "").trim() || undefined, dose: String(form.get("dose") ?? "").trim() || undefined, createdAt: now };
+      const track: ProgressTrack = { id, kind: "supplement", name, areas: [], startedOn: startedOn || undefined, notes: String(form.get("notes") ?? "").trim() || undefined, status: "active", createdAt: now, products: [product], photos: [], checkIns: [] };
+      onChange({ tracks: [track, ...data.tracks] });
+      setSelectedId(id);
+    }
+    event.currentTarget.reset(); setShowTrackForm(false);
+  }
+
+  function newProductFromForm(form: FormData, createdAt: string): ProgressProduct | null {
+    const source = String(form.get("productSource") ?? "custom");
+    if (source.startsWith("library:")) {
+      const item = itemById.get(source.slice(8));
+      return item ? { id: makeId(), name: item.name, brand: item.brand, linkedItemId: item.id, createdAt } : null;
+    }
+    if (source.startsWith("routine:")) {
+      const product = routineById.get(source.slice(8));
+      return product ? { id: makeId(), name: product.name, brand: product.brand, linkedItemId: product.linkedItemId, linkedRoutineProductId: product.id, createdAt } : null;
+    }
+    const name = String(form.get("productName") ?? "").trim();
+    return name ? { id: makeId(), name, brand: String(form.get("productBrand") ?? "").trim() || undefined, createdAt } : null;
+  }
+
+  function logUse(track: ProgressTrack, product: ProgressProduct, used: boolean, feeling?: string) {
+    const date = localToday();
+    const previous = track.checkIns.find((entry) => entry.productId === product.id && entry.date === date);
+    const entry: ProgressCheckIn = { id: previous?.id ?? makeId(), productId: product.id, date, used, feeling: feeling ?? previous?.feeling, note: feelingNotes[product.id]?.trim() || previous?.note, createdAt: previous?.createdAt ?? new Date().toISOString() };
+    changeTrack(track.id, (current) => ({ ...current, startedOn: current.kind === "supplement" ? current.startedOn || date : current.startedOn, checkIns: previous ? current.checkIns.map((value) => value.id === previous.id ? entry : value) : [...current.checkIns, entry] }));
+  }
+
+  async function handlePhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ""; setPhotoError("");
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type) || file.size > 10 * 1024 * 1024) { setPhotoError("Choose a JPG, PNG, or WebP photo under 10 MB."); return; }
+    try { setPhotoData(await compressImage(file)); }
+    catch (error) { setPhotoError(error instanceof Error ? error.message : "That photo could not be prepared."); }
+  }
+
+  const interval = (() => {
+    if (!selected || selected.photos.length === 0 || !photoDate) return null;
+    const previousPhoto = orderedPhotos(selected).filter((photo) => photo.date <= photoDate).at(-1);
+    if (!previousPhoto) return null;
+    const periodDays = daysBetween(previousPhoto.date, photoDate);
+    const checkIns = selected.products.map((product) => {
+      const entries = selected.checkIns.filter((entry) => entry.productId === product.id && entry.date > previousPhoto.date && entry.date <= photoDate);
+      const loggedDates = new Set(entries.map((entry) => entry.date));
+      return { product, periodDays, loggedDays: loggedDates.size, usedCount: entries.filter((entry) => entry.used).length, needsEstimate: loggedDates.size < periodDays };
+    });
+    return { previousPhoto, periodDays, checkIns };
+  })();
+
+  function openPhotoForm() {
+    setPhotoData(""); setPhotoError(""); setPhotoDate(localToday()); setPhotoNote(""); setPhotoCounts({}); setShowPhotoForm(true);
+  }
+
+  function savePhoto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || !photoData || !photoDate) { setPhotoError("Choose a photo and its date first."); return; }
+    const form = new FormData(event.currentTarget);
+    const usageCounts: Record<string, number> = {};
+    if (interval) for (const { product, periodDays, needsEstimate, usedCount } of interval.checkIns) {
+      const value = String(form.get(`usage-${product.id}`) ?? "").trim();
+      if (needsEstimate && !value) { setPhotoError(`Add an estimate for ${product.name}, or enter 0.`); return; }
+      const count = value === "" ? usedCount : Number(value);
+      if (!Number.isInteger(count) || count < 0 || count > periodDays) { setPhotoError(`Enter a use count from 0 to ${periodDays} for ${product.name}.`); return; }
+      usageCounts[product.id] = count;
+    }
+    const photo: ProgressPhoto = { id: makeId(), date: photoDate, photo: photoData, note: photoNote.trim() || undefined, periodDays: interval?.periodDays, usageCounts: interval ? usageCounts : undefined, createdAt: new Date().toISOString() };
+    changeTrack(selected.id, (track) => ({ ...track, photos: [...track.photos, photo] }));
+    setShowPhotoForm(false); setPhotoData(""); setPhotoNote(""); setPhotoCounts({}); setCompareIds([]);
+  }
+
+  function addProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const product = newProductFromForm(new FormData(event.currentTarget), new Date().toISOString());
+    if (!product) { setPhotoError("Choose a saved product or enter a product name."); return; }
+    changeTrack(selected.id, (track) => ({ ...track, products: [...track.products, product] }));
+    setShowProductForm(false); setCustomProductForm(false); setPhotoError(""); event.currentTarget.reset();
+  }
+
+  function addDailyFeeling(event: FormEvent<HTMLFormElement>, track: ProgressTrack, product: ProgressProduct) {
+    event.preventDefault();
+    const current = track.checkIns.find((entry) => entry.productId === product.id && entry.date === localToday());
+    if (!current) return;
+    const form = new FormData(event.currentTarget);
+    const feeling = String(form.get("feeling") ?? "");
+    const note = String(form.get("feelingNote") ?? "").trim();
+    changeTrack(track.id, (value) => ({ ...value, checkIns: value.checkIns.map((entry) => entry.id === current.id ? { ...entry, feeling: feeling || undefined, note: note || undefined } : entry) }));
+    setFeelingNotes((values) => ({ ...values, [product.id]: note }));
+  }
+
+  function toggleCompare(id: string) {
+    setCompareIds((current) => current.includes(id) ? current.filter((value) => value !== id) : current.length < 2 ? [...current, id] : [current[1], id]);
+  }
+
+  function productLabel(product: ProgressProduct) {
+    const item = product.linkedItemId ? itemById.get(product.linkedItemId) : undefined;
+    const routineProduct = product.linkedRoutineProductId ? routineById.get(product.linkedRoutineProductId) : undefined;
+    return item?.name ?? routineProduct?.name ?? product.name;
+  }
+
+  const tracks = selected ? undefined : activeTracks;
+  const chosenPhotos = selected ? selected.photos.filter((photo) => compareIds.includes(photo.id)) : [];
+
+  return <section className="progress-view" aria-labelledby="progress-title">
+    <header className="progress-header"><div><p className="eyebrow">YOUR PERSONAL CHECKPOINTS</p><h1 id="progress-title">Progress<span className="period">.</span></h1><p>Small records of what you use and how things change over time.</p></div><div className="progress-tabs" role="tablist" aria-label="Progress journals">
+      <button type="button" role="tab" aria-selected={tab === "skin"} className={tab === "skin" ? "active" : ""} onClick={() => { setTab("skin"); setSelectedId(null); setShowTrackForm(false); }}>Skin</button>
+      <button type="button" role="tab" aria-selected={tab === "supplement"} className={tab === "supplement" ? "active" : ""} onClick={() => { setTab("supplement"); setSelectedId(null); setShowTrackForm(false); }}>Supplements</button>
+    </div></header>
+
+    {selected ? <div className="progress-detail">
+      <button type="button" className="mobile-back-button progress-back" onClick={() => { setSelectedId(null); setShowPhotoForm(false); setShowProductForm(false); }}>← All {tab === "skin" ? "skin journeys" : "supplements"}</button>
+      <div className="progress-detail-heading"><div><p className="eyebrow">{tab === "skin" ? selected.areas.join(" · ") || "SKIN JOURNEY" : "SUPPLEMENT JOURNEY"}</p><h2>{selected.name}<span className="period">.</span></h2><p>{trackStart(selected) ? `Day ${dayNumber(localToday(), trackStart(selected)!)}` : "Add a start date or first check-in to begin counting days."}{selected.status === "completed" ? " · Past journey" : ""}</p></div><button type="button" className="text-button" onClick={() => changeTrack(selected.id, (track) => ({ ...track, status: track.status === "active" ? "completed" : "active" }))}>{selected.status === "active" ? "Finish journey" : "Reopen journey"}</button></div>
+
+      <section className="progress-products" aria-labelledby="progress-products-title"><div className="progress-section-heading"><div><p className="eyebrow">WHAT I’M USING</p><h3 id="progress-products-title">{tab === "skin" ? "Products" : "Supplement"}<span className="period">.</span></h3></div>{tab === "skin" ? <button type="button" className="button button-outline" onClick={() => { setShowProductForm(true); setCustomProductForm(false); }}>＋ Add product</button> : null}</div>
+        <div className="progress-product-list">{selected.products.map((product) => {
+          const todayEntry = selected.checkIns.find((entry) => entry.productId === product.id && entry.date === localToday());
+          const uses = selected.checkIns.filter((entry) => entry.productId === product.id && entry.used).length;
+          return <article className="progress-product-card" key={product.id}><div className="progress-product-main"><div className="progress-thumb">{photoForProduct(product) ? <img src={photoForProduct(product)} alt="" /> : <span>{productLabel(product).slice(0, 1).toUpperCase()}</span>}</div><div><strong>{productLabel(product)}</strong>{product.brand ? <small>{product.brand}</small> : null}{product.dose ? <small>{product.dose}</small> : null}<small>{uses} logged use{uses === 1 ? "" : "s"}</small></div></div>
+            <div className="progress-checkin-controls"><span>{tab === "skin" ? "Used today?" : "Taken today?"}</span><div><button type="button" className={todayEntry?.used ? "selected" : ""} onClick={() => logUse(selected, product, true)}>{tab === "skin" ? "Used" : "Taken"}</button><button type="button" className={todayEntry && !todayEntry.used ? "selected" : ""} onClick={() => logUse(selected, product, false)}>{tab === "skin" ? "Not used" : "Skipped"}</button></div></div>
+            {todayEntry ? <form className="progress-feeling-form" onSubmit={(event) => addDailyFeeling(event, selected, product)}><label><span>How did it feel? <b>OPTIONAL</b></span><select name="feeling" defaultValue={todayEntry.feeling ?? ""}><option value="">No note today</option><option value="good">Felt good</option><option value="no-change">No clear change</option><option value="off">Felt off</option></select></label><label><span>Anything to remember? <b>OPTIONAL</b></span><input name="feelingNote" maxLength={300} defaultValue={todayEntry.note ?? ""} placeholder="A short note" /></label><button type="submit" className="text-button">Save today’s note</button></form> : null}
+          </article>;
+        })}{selected.products.length === 0 ? <p className="progress-empty">No products are attached to this journey yet.</p> : null}</div>
+      </section>
+
+      {showProductForm ? <form className="progress-form" onSubmit={addProduct}><div className="progress-form-heading"><strong>Add something to this journey</strong><button className="text-button" type="button" onClick={() => setShowProductForm(false)}>Cancel</button></div>
+        {customProductForm ? <><label className="field"><span>Product name</span><input name="productName" maxLength={160} placeholder="e.g. Glycolic acid" required /></label><label className="field"><span>Brand <b>OPTIONAL</b></span><input name="productBrand" maxLength={100} placeholder="Brand name" /></label></> : <ProductChooser items={items} routine={routine} onPick={(product) => { changeTrack(selected.id, (track) => ({ ...track, products: [...track.products, product] })); setShowProductForm(false); }} onCustom={() => setCustomProductForm(true)} />}
+        {customProductForm ? <button className="button button-primary" type="submit">Add product</button> : null}{photoError ? <p className="form-error" role="alert">{photoError}</p> : null}
+      </form> : null}
+
+      <section className="progress-timeline" aria-labelledby="progress-timeline-title"><div className="progress-section-heading"><div><p className="eyebrow">YOUR CHECKPOINTS</p><h3 id="progress-timeline-title">Timeline<span className="period">.</span></h3></div><button type="button" className="button button-primary" onClick={openPhotoForm}>＋ Add photo</button></div>
+        {selected.photos.length > 1 ? <p className="progress-compare-hint">Choose two photos to compare.</p> : null}
+        {chosenPhotos.length === 2 ? <div className="progress-comparison" aria-label="Side-by-side photo comparison">{chosenPhotos.map((photo) => <figure key={photo.id}><img src={photo.photo} alt={`${selected.name} progress on ${formatDate(photo.date)}`} /><figcaption>{tab === "skin" ? `Day ${dayNumber(photo.date, orderedPhotos(selected)[0].date)}` : trackStart(selected) ? `Day ${dayNumber(photo.date, trackStart(selected)!)}` : "Progress photo"} · {formatDate(photo.date)}</figcaption></figure>)}</div> : null}
+        {selected.photos.length ? <ol className="progress-photo-timeline">{orderedPhotos(selected).map((photo, index, photos) => {
+          const baseline = trackStart(selected) || photo.date;
+          const prior = photos[index - 1];
+          return <li key={photo.id} className="progress-photo-entry"><div className="progress-photo-image"><img src={photo.photo || ""} alt={`${selected.name} progress on ${formatDate(photo.date)}`} /><button type="button" className={`progress-compare-select${compareIds.includes(photo.id) ? " selected" : ""}`} onClick={() => toggleCompare(photo.id)} aria-pressed={compareIds.includes(photo.id)}>{compareIds.includes(photo.id) ? "Selected to compare" : "Compare"}</button></div><div className="progress-photo-copy"><p className="eyebrow">{tab === "skin" ? `DAY ${dayNumber(photo.date, baseline)}` : trackStart(selected) ? `DAY ${dayNumber(photo.date, trackStart(selected)!)}` : `CHECKPOINT ${index + 1}`}</p><h4>{formatDate(photo.date)}</h4>{prior ? <p>{photo.usageCounts ? selected.products.map((product) => `${productLabel(product)}: ${photo.usageCounts?.[product.id] ?? 0}/${photo.periodDays ?? daysBetween(prior.date, photo.date)} days`).join(" · ") : `${selected.checkIns.filter((entry) => entry.date > prior.date && entry.date <= photo.date && entry.used).length} recorded uses since last photo`}</p> : <p>Starting photo · Day 1</p>}{photo.note ? <p className="progress-photo-note">{photo.note}</p> : null}</div></li>;
+        })}</ol> : <div className="progress-empty progress-photo-empty"><strong>Your first photo starts Day 1.</strong><p>Keep the same lighting and framing when you can. You can add more checkpoints whenever you like.</p><button className="button button-primary" type="button" onClick={openPhotoForm}>Add the first photo</button></div>}
+      </section>
+
+      {showPhotoForm ? <form className="progress-form progress-photo-form" onSubmit={savePhoto}><div className="progress-form-heading"><strong>{selected.photos.length ? "Add a progress photo" : "Start with your Day 1 photo"}</strong><button className="text-button" type="button" onClick={() => setShowPhotoForm(false)}>Cancel</button></div>
+        <label className="field"><span>Photo <b>REQUIRED</b></span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={handlePhoto} required={!photoData} /></label>{photoData ? <img className="progress-upload-preview" src={photoData} alt="Photo preview" /> : null}
+        <label className="field"><span>Date taken</span><input type="date" value={photoDate} max={localToday()} onChange={(event) => setPhotoDate(event.target.value)} required /></label>
+        {interval?.checkIns.map(({ product, periodDays, loggedDays, usedCount, needsEstimate }) => needsEstimate ? <label className="field" key={product.id}><span>How many times did you use {productLabel(product)} in the last {periodDays} days?</span><small className="field-hint">Check-ins cover {loggedDays} days. Give your best estimate, or enter 0.</small><input type="number" name={`usage-${product.id}`} min="0" max={periodDays} step="1" inputMode="numeric" value={photoCounts[product.id] ?? String(usedCount)} onChange={(event) => setPhotoCounts((current) => ({ ...current, [product.id]: event.target.value }))} required /></label> : null)}
+        {interval && !interval.checkIns.some((entry) => entry.needsEstimate) ? <p className="progress-estimate-confirm">All {interval.periodDays} days are logged. Usage totals will come from your daily check-ins.</p> : null}
+        <label className="field"><span>A note <b>OPTIONAL</b></span><textarea value={photoNote} onChange={(event) => setPhotoNote(event.target.value)} maxLength={2000} rows={3} placeholder="Lighting, changes, or anything you want to remember" /></label>
+        {photoError ? <p className="form-error" role="alert">{photoError}</p> : null}<button type="submit" className="button button-primary" disabled={!photoData}>Save checkpoint</button>
+      </form> : null}
+    </div> : <>
+      <div className="progress-overview-heading"><div><p className="eyebrow">{tab === "skin" ? "AREAS & ROUTINES" : "YOUR SUPPLEMENTS"}</p><h2>{tab === "skin" ? "Skin journeys" : "Supplement tracks"}<span className="period">.</span></h2><p>{tab === "skin" ? "Keep photos, product use, and notes together by area." : "Follow each supplement on its own timeline."}</p></div><button className="button button-primary" type="button" onClick={() => setShowTrackForm((value) => !value)}>＋ {tab === "skin" ? "New skin journey" : "Add supplement"}</button></div>
+      {showTrackForm ? <form className="progress-form progress-new-track" onSubmit={newTrack}><div className="progress-form-heading"><strong>{tab === "skin" ? "New skin journey" : "New supplement"}</strong><button className="text-button" type="button" onClick={() => setShowTrackForm(false)}>Cancel</button></div>
+        <label className="field"><span>{tab === "skin" ? "Journey name" : "Supplement name"}</span><input name="trackName" maxLength={120} placeholder={tab === "skin" ? "e.g. Face" : "e.g. Omega 3"} required /></label>
+        {tab === "skin" ? <><label className="field"><span>Area or focus <b>OPTIONAL</b></span><input name="areas" maxLength={300} placeholder="e.g. Face, hands, neck" /><small className="field-hint">Separate areas with commas.</small></label><fieldset className="progress-product-start"><legend>First product <b>OPTIONAL</b></legend><input type="hidden" name="productSource" value={firstProductSource} />{firstProductSource === "custom" ? <div className="progress-first-product"><label className="field"><span>Product name</span><input name="productName" maxLength={160} placeholder="e.g. Glycolic acid" /></label><label className="field"><span>Brand <b>OPTIONAL</b></span><input name="productBrand" maxLength={100} placeholder="Brand name" /></label><button type="button" className="text-button" onClick={() => setShowFirstProductPicker((value) => !value)}>{showFirstProductPicker ? "Hide saved products" : "Choose from Library or Routine"}</button></div> : null}{showFirstProductPicker || firstProductSource !== "custom" ? <ProductChooser items={items} routine={routine} onPick={(product) => { setFirstProductSource(product.linkedItemId ? `library:${product.linkedItemId}` : product.linkedRoutineProductId ? `routine:${product.linkedRoutineProductId}` : "custom"); setShowFirstProductPicker(false); }} onCustom={() => { setFirstProductSource("custom"); setShowFirstProductPicker(false); }} /> : null}{firstProductSource !== "custom" ? <p className="field-hint">A saved product is selected for this journey.</p> : null}</fieldset><button className="button button-primary" type="submit">Create journey</button></> : <><label className="field"><span>Brand <b>OPTIONAL</b></span><input name="brand" maxLength={100} placeholder="Brand name" /></label><label className="field"><span>Dose or serving <b>OPTIONAL</b></span><input name="dose" maxLength={120} placeholder="e.g. 1 capsule" /></label><label className="field"><span>Started taking it <b>OPTIONAL</b></span><input name="startedOn" type="date" max={localToday()} /></label><label className="field"><span>Notes <b>OPTIONAL</b></span><textarea name="notes" maxLength={2000} rows={2} placeholder="Anything you want to keep in mind" /></label><button className="button button-primary" type="submit">Create supplement track</button></>}
+      </form> : null}
+      {customProductForm && !selected ? <form className="progress-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get("customName") ?? "").trim(); if (!name) return; const product: ProgressProduct = { id: makeId(), name, brand: String(form.get("customBrand") ?? "").trim() || undefined, createdAt: new Date().toISOString() }; const trackId = makeId(); const track: ProgressTrack = { id: trackId, kind: "skin", name: "Skin journey", areas: [], status: "active", createdAt: new Date().toISOString(), products: [product], photos: [], checkIns: [] }; onChange({ tracks: [track, ...data.tracks] }); setSelectedId(trackId); setCustomProductForm(false); }}><div className="progress-form-heading"><strong>Add a custom product</strong><button type="button" className="text-button" onClick={() => setCustomProductForm(false)}>Cancel</button></div><label className="field"><span>Name</span><input name="customName" placeholder="e.g. Glycolic acid" required /></label><label className="field"><span>Brand <b>OPTIONAL</b></span><input name="customBrand" /></label><button type="submit" className="button button-primary">Create with this product</button></form> : null}
+      {activeTracks.length ? <div className={`progress-track-grid ${tab === "supplement" ? "supplement-track-grid" : ""}`}>{tracks?.map((track) => {
+        const start = trackStart(track);
+        const latestPhoto = orderedPhotos(track).at(-1);
+        const latestCheckin = [...track.checkIns].sort((a, b) => b.date.localeCompare(a.date))[0];
+        const loggedUses = track.checkIns.filter((entry) => entry.used).length;
+        return <button type="button" className="progress-track-card" key={track.id} onClick={() => setSelectedId(track.id)}><span className="progress-card-photo">{latestPhoto?.photo ? <img src={latestPhoto.photo} alt="" /> : <span>{tab === "skin" ? "◎" : "＋"}</span>}</span><span className="progress-card-body"><small>{tab === "skin" ? track.areas.join(" · ") || "SKIN JOURNEY" : "SUPPLEMENT"}</small><strong>{track.name}</strong><span>{track.products.map((product) => product.name).join(" · ") || "No products yet"}</span><span>{start ? `Day ${dayNumber(localToday(), start)}` : "Add a start date or check-in"} · {track.photos.length} photo{track.photos.length === 1 ? "" : "s"}</span><span>{tab === "skin" ? `${loggedUses} recorded uses` : latestCheckin ? `Last check-in ${formatDate(latestCheckin.date)}` : "No check-ins yet"}</span></span><span className="progress-card-arrow" aria-hidden="true">→</span></button>;
+      })}</div> : <div className="progress-empty progress-overview-empty"><span className="empty-glyph">◷</span><strong>{pastTracks.length ? "No active tracks." : tab === "skin" ? "Start a skin journey." : "Add a supplement to follow."}</strong><p>{tab === "skin" ? "Group products and photos by area. Your first photo will be Day 1." : "Log when you take it and how you feel. Photos are optional."}</p>{!showTrackForm ? <button type="button" className="button button-primary" onClick={() => setShowTrackForm(true)}>＋ {tab === "skin" ? "New skin journey" : "Add supplement"}</button> : null}</div>}
+      {pastTracks.length ? <details className="progress-past-tracks"><summary>Past journeys <span>{pastTracks.length}</span></summary><div className="progress-track-grid">{pastTracks.map((track) => <button type="button" className="progress-track-card" key={track.id} onClick={() => setSelectedId(track.id)}><span className="progress-card-photo"><span>↺</span></span><span className="progress-card-body"><small>PAST</small><strong>{track.name}</strong><span>{track.products.map((product) => product.name).join(" · ")}</span></span><span className="progress-card-arrow" aria-hidden="true">→</span></button>)}</div></details> : null}
+    </>}
+  </section>;
+}

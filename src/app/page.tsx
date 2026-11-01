@@ -7,15 +7,17 @@ import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState
 import Link from "next/link";
 import {
   ageLabel, BackupFile, CATEGORIES, categoryForItemType, detailFields, EMPTY_ROUTINE_DATA, EventKind, formatDate, formatMoney, isConsumableType, isServiceType, ITEM_TYPES, ItemEvent,
-  fallbackItemImage, lastOfKind, makeId, ProductVariant, purchases, ROUTINE_STORAGE_KEY, RoutineData, sortedEvents, STORAGE_KEY, TrackedItem, validItems, validRoutineData,
+  EMPTY_PROGRESS_DATA, fallbackItemImage, lastOfKind, makeId, ProductVariant, ProgressData, PROGRESS_STORAGE_KEY, purchases, ROUTINE_STORAGE_KEY, RoutineData, sortedEvents, STORAGE_KEY, TrackedItem, validItems, validProgressData, validRoutineData,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
 import { CalendarView } from "@/app/calendar-view";
 import { RoutineView } from "@/app/routine-view";
+import { ProgressView } from "@/app/progress-view";
 import { detectRetailer, RETAILERS } from "@/lib/retailers";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { importTrackerItems, loadTrackerItems, makeCloudCompatibleItems, syncTrackerItems } from "@/lib/supabase/tracker";
 import { loadRoutineData, syncRoutineData } from "@/lib/supabase/routine";
+import { loadProgressData, syncProgressData } from "@/lib/supabase/progress";
 import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"];
@@ -150,6 +152,7 @@ export default function Home() {
   const [authReady, setAuthReady] = useState(!supabaseConfigured);
   const [ready, setReady] = useState(!supabaseConfigured);
   const [routineLoaded, setRoutineLoaded] = useState(false);
+  const [progressLoaded, setProgressLoaded] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [migrationItems, setMigrationItems] = useState<TrackedItem[] | null>(null);
   const [migrationRoutineData, setMigrationRoutineData] = useState<RoutineData | null>(null);
@@ -164,8 +167,9 @@ export default function Home() {
   const [timeKindFilter, setTimeKindFilter] = useState("any");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
-  const [view, setView] = useState<"library" | "services" | "calendar" | "routine">("library");
+  const [view, setView] = useState<"library" | "services" | "calendar" | "routine" | "progress">("library");
   const [routineData, setRoutineData] = useState<RoutineData>(EMPTY_ROUTINE_DATA);
+  const [progressData, setProgressData] = useState<ProgressData>(EMPTY_PROGRESS_DATA);
   const [modal, setModal] = useState<"item" | "edit-item" | "event" | "variant" | null>(null);
   const [formError, setFormError] = useState("");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -220,8 +224,10 @@ export default function Home() {
   const addProductPhotoInput = useRef<HTMLInputElement>(null);
   const lastSyncedItems = useRef<TrackedItem[]>([]);
   const lastSyncedRoutine = useRef<RoutineData>(EMPTY_ROUTINE_DATA);
+  const lastSyncedProgress = useRef<ProgressData>(EMPTY_PROGRESS_DATA);
   const syncQueue = useRef<Promise<void>>(Promise.resolve());
   const routineSyncQueue = useRef<Promise<void>>(Promise.resolve());
+  const progressSyncQueue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     const media = window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 920px)");
     const update = () => setIsMobileLayout(media.matches);
@@ -369,6 +375,8 @@ export default function Home() {
         if (!userId) {
           loadedUserId = null;
           setItems([]);
+          setProgressData(EMPTY_PROGRESS_DATA);
+          setProgressLoaded(true);
           setCloudReady(false);
           setReady(true);
           return;
@@ -377,7 +385,7 @@ export default function Home() {
         loadedUserId = userId;
         setCloudReady(false); setReady(false);
         try {
-          const [cloudItems, cloudRoutine] = await Promise.all([loadTrackerItems(supabase, userId), loadRoutineData(supabase, userId)]);
+          const [cloudItems, cloudRoutine, cloudProgress] = await Promise.all([loadTrackerItems(supabase, userId), loadRoutineData(supabase, userId), loadProgressData(supabase, userId)]);
           if (!active) return;
           let initialItems = cloudItems;
           const pendingKey = pendingItemsKey(userId);
@@ -395,9 +403,12 @@ export default function Home() {
           } catch { /* Use the cloud copy when no recoverable local save exists. */ }
           lastSyncedItems.current = cloudItems;
           lastSyncedRoutine.current = cloudRoutine;
+          lastSyncedProgress.current = cloudProgress;
           setItems(initialItems);
           setRoutineData(cloudRoutine);
+          setProgressData(cloudProgress);
           setRoutineLoaded(true);
+          setProgressLoaded(true);
           setCloudReady(true);
           const decisionKey = `kept-import-asked-${userId}`;
           const saved = localStorage.getItem(STORAGE_KEY);
@@ -431,14 +442,42 @@ export default function Home() {
           const parsedRoutine: unknown = JSON.parse(savedRoutine);
           if (validRoutineData(parsedRoutine)) setRoutineData(parsedRoutine);
         }
+        const savedProgress = localStorage.getItem(PROGRESS_STORAGE_KEY);
+        if (savedProgress) {
+          const parsedProgress: unknown = JSON.parse(savedProgress);
+          if (validProgressData(parsedProgress)) setProgressData(parsedProgress);
+        }
       } catch {
         setNotice("Your saved record could not be read. You can restore a backup to continue.");
       }
       setRoutineLoaded(true);
+      setProgressLoaded(true);
       setReady(true);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [supabaseConfigured]);
+
+  useEffect(() => {
+    if (!ready || !progressLoaded) return;
+    if (!supabaseConfigured) {
+      try { localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(progressData)); }
+      catch { window.setTimeout(() => setNotice("Progress could not be saved in this browser. Export a backup to keep your changes."), 0); }
+      return;
+    }
+    if (!user || !cloudReady) return;
+    if (JSON.stringify(lastSyncedProgress.current) === JSON.stringify(progressData)) return;
+    const previous = lastSyncedProgress.current;
+    const next = progressData;
+    lastSyncedProgress.current = next;
+    progressSyncQueue.current = progressSyncQueue.current.then(async () => {
+      const normalized = await syncProgressData(createClient(), user.id, previous, next);
+      lastSyncedProgress.current = normalized;
+      setProgressData((current) => JSON.stringify(current) === JSON.stringify(next) ? normalized : current);
+    }).catch((error: unknown) => {
+      lastSyncedProgress.current = previous;
+      setNotice(error instanceof Error ? `Could not save Progress: ${error.message}` : "Could not save Progress. Try again.");
+    });
+  }, [progressData, ready, progressLoaded, user, cloudReady, supabaseConfigured]);
 
   useEffect(() => {
     if (!ready || !routineLoaded) return;
@@ -501,7 +540,7 @@ export default function Home() {
     lastSyncedItems.current = next;
     const supabase = createClient();
     const pendingKey = pendingItemsKey(user.id);
-    let deletedIds = new Set<string>();
+    const deletedIds = new Set<string>();
     try {
       const existingRaw = localStorage.getItem(pendingKey);
       const existing = existingRaw ? JSON.parse(existingRaw) as Partial<PendingItemSnapshot> : null;
@@ -511,7 +550,7 @@ export default function Home() {
     next.forEach((item) => deletedIds.delete(item.id));
     const pendingSnapshot: PendingItemSnapshot = { items: next, deletedIds: [...deletedIds] };
     try { localStorage.setItem(pendingKey, JSON.stringify(pendingSnapshot)); }
-    catch { setNotice("Your account save is still syncing. Keep this page open until it finishes."); }
+    catch { window.setTimeout(() => setNotice("Your account save is still syncing. Keep this page open until it finishes."), 0); }
     syncQueue.current = syncQueue.current.then(async () => {
       const photoPaths = await syncTrackerItems(supabase, user.id, previous, next);
       lastSyncedItems.current = next.map((item) => photoPaths.has(item.id) ? { ...item, productPhotoPath: photoPaths.get(item.id) } : item);
@@ -1071,7 +1110,26 @@ export default function Home() {
         return { ...product, photo: dataUrl, photoPath: undefined };
       } catch { return { ...product, photo: undefined, photoPath: undefined }; }
     }));
-    const backup: BackupFile = { format: "kept-backup", version: 1, exportedAt: new Date().toISOString(), items: backupItems, routine: { ...routineData, products: backupProducts } };
+    const backupTracks = await Promise.all(progressData.tracks.map(async (track) => ({
+      ...track,
+      photos: await Promise.all(track.photos.map(async (photo) => {
+        if (photo.photo?.startsWith("data:image/")) return { ...photo, photoPath: undefined };
+        try {
+          let source = photo.photo;
+          if (photo.photoPath && user) {
+            const { data: signed } = await createClient().storage.from("product-photos").createSignedUrl(photo.photoPath, 60 * 5);
+            source = signed?.signedUrl ?? source;
+          }
+          if (!source) return { ...photo, photo: undefined, photoPath: undefined };
+          const response = await fetch(source);
+          if (!response.ok) return { ...photo, photo: undefined, photoPath: undefined };
+          const blob = await response.blob();
+          const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+          return { ...photo, photo: dataUrl, photoPath: undefined };
+        } catch { return { ...photo, photo: undefined, photoPath: undefined }; }
+      })),
+    })));
+    const backup: BackupFile = { format: "kept-backup", version: 2, exportedAt: new Date().toISOString(), items: backupItems, routine: { ...routineData, products: backupProducts }, progress: { tracks: backupTracks } };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -1156,13 +1214,21 @@ export default function Home() {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text()) as Partial<BackupFile>;
-      if (parsed.format !== "kept-backup" || parsed.version !== 1 || !validItems(parsed.items) || (parsed.routine !== undefined && !validRoutineData(parsed.routine))) throw new Error("invalid backup");
+      if (parsed.format !== "kept-backup" || (parsed.version !== 1 && parsed.version !== 2) || !validItems(parsed.items) || (parsed.routine !== undefined && !validRoutineData(parsed.routine)) || (parsed.progress !== undefined && !validProgressData(parsed.progress))) throw new Error("invalid backup");
       if (!window.confirm(`Restore ${parsed.items.length} item${parsed.items.length === 1 ? "" : "s"}? This replaces the records ${user ? "in your account" : "in this browser"}.`)) return;
       const restored = user ? makeCloudCompatibleItems(parsed.items) : parsed.items;
       const restoredIdMap = new Map(parsed.items.map((item, index) => [item.id, restored[index]?.id ?? item.id]));
       setItems(restored);
       const restoredRoutine = parsed.routine && validRoutineData(parsed.routine) ? parsed.routine : EMPTY_ROUTINE_DATA;
       setRoutineData(user ? { ...restoredRoutine, products: restoredRoutine.products.map((product) => ({ ...product, linkedItemId: product.linkedItemId ? restoredIdMap.get(product.linkedItemId) ?? product.linkedItemId : undefined })) } : restoredRoutine);
+      const restoredProgress = parsed.progress && validProgressData(parsed.progress) ? parsed.progress : EMPTY_PROGRESS_DATA;
+      setProgressData(restoredProgress);
+      if (user) {
+        const previousProgress = lastSyncedProgress.current;
+        const normalizedProgress = await syncProgressData(createClient(), user.id, previousProgress, restoredProgress);
+        lastSyncedProgress.current = normalizedProgress;
+        setProgressData(normalizedProgress);
+      }
       setSelectedId(restored[0]?.id ?? null);
       setSearch("");
       setCategory("All things");
@@ -1293,6 +1359,7 @@ export default function Home() {
         <button type="button" className={view === "services" ? "active" : ""} aria-current={view === "services" ? "page" : undefined} onClick={() => { setView("services"); setSelectedId(null); setArchiveOpen(false); clearLibraryFilters(); }}>Services</button>
         <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => { setView("calendar"); setSelectedId(null); }}>Calendar</button>
         <button type="button" className={view === "routine" ? "active" : ""} aria-current={view === "routine" ? "page" : undefined} onClick={() => { setView("routine"); setSelectedId(null); }}>Routine</button>
+        <button type="button" className={view === "progress" ? "active" : ""} aria-current={view === "progress" ? "page" : undefined} onClick={() => { setView("progress"); setSelectedId(null); }}>Progress</button>
       </nav>
 
       <div id="main-content">
@@ -1390,7 +1457,7 @@ export default function Home() {
             </div>
             <div className="history-heading"><div><p className="eyebrow">HISTORY</p><h4>Timeline<span className="period">.</span></h4></div></div>
             <div className="timeline">
-            {sortedEvents(selectedItem).length ? sortedEvents(selectedItem).map((event, index) => <article className={`timeline-entry ${event.kind}`} key={event.id}>
+            {sortedEvents(selectedItem).length ? sortedEvents(selectedItem).map((event) => <article className={`timeline-entry ${event.kind}`} key={event.id}>
                 <span className="timeline-node" aria-hidden="true"><span /></span><div className="timeline-copy"><div className="event-label-row"><span className="event-label">{labelForKind(event.kind)}</span><span className="event-date">{formatDate(event.date)}</span></div>
                   {event.kind === "purchase" && (event.variant || (event.quantity ?? 1) > 1) ? <span className="event-variant">{[event.quantity && event.quantity > 1 ? `${event.quantity} units` : null, event.variant].filter(Boolean).join(" · ")}</span> : null}
                   {event.attributes && Object.entries(event.attributes).some(([, value]) => value) ? <span className="event-attributes">{Object.entries(event.attributes).filter(([, value]) => value).map(([key, value]) => `${attributeLabel(key)}: ${value}`).join(" · ")}</span> : null}
@@ -1408,6 +1475,7 @@ export default function Home() {
       </> : null}
       <div className="calendar-keep-alive" hidden={view !== "calendar"}><CalendarView items={items} onOpenItem={openCalendarItem} isMobileLayout={isMobileLayout} /></div>
       <div className="routine-keep-alive" hidden={view !== "routine"}><RoutineView data={routineData} onChange={setRoutineData} items={items} /></div>
+      <div className="progress-keep-alive" hidden={view !== "progress"}><ProgressView data={progressData} onChange={setProgressData} items={items} routine={routineData} /></div>
       </div>
 
       <nav className="mobile-tabbar" aria-label="Primary navigation">
@@ -1415,6 +1483,7 @@ export default function Home() {
         <button type="button" className={view === "services" ? "active" : ""} aria-current={view === "services" ? "page" : undefined} onClick={() => { setView("services"); setSelectedId(null); setArchiveOpen(false); clearLibraryFilters(); }}><span aria-hidden="true">✂</span>Services</button>
         <button type="button" className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} onClick={() => { setView("calendar"); setSelectedId(null); }}><span aria-hidden="true">▦</span>Calendar</button>
         <button type="button" className={view === "routine" ? "active" : ""} aria-current={view === "routine" ? "page" : undefined} onClick={() => { setView("routine"); setSelectedId(null); }}><span aria-hidden="true">◷</span>Routine</button>
+        <button type="button" className={view === "progress" ? "active" : ""} aria-current={view === "progress" ? "page" : undefined} onClick={() => { setView("progress"); setSelectedId(null); }}><span aria-hidden="true">◉</span>Progress</button>
       </nav>
 
       <footer className="page-footer"><Link className="footer-brand" href="/">kept<span>.</span></Link></footer>

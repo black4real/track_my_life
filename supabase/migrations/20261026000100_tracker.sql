@@ -72,3 +72,4 @@ create policy "Members can update their product photos" on storage.objects
 
 create policy "Members can delete their product photos" on storage.objects
   for delete to authenticated using (bucket_id = 'product-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
