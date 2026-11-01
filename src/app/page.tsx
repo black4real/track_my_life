@@ -7,7 +7,7 @@ import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState
 import Link from "next/link";
 import {
   ageLabel, BackupFile, CATEGORIES, categoryForItemType, detailFields, EMPTY_ROUTINE_DATA, EventKind, formatDate, formatMoney, isConsumableType, isServiceType, ITEM_TYPES, ItemEvent,
-  EMPTY_PROGRESS_DATA, fallbackItemImage, lastOfKind, makeId, ProductVariant, ProgressData, PROGRESS_STORAGE_KEY, purchases, ROUTINE_STORAGE_KEY, RoutineData, sortedEvents, STORAGE_KEY, TrackedItem, validItems, validProgressData, validRoutineData,
+  EMPTY_PROGRESS_DATA, fallbackItemImage, lastOfKind, makeId, ProductVariant, ProgressData, PROGRESS_STORAGE_KEY, purchases, ROUTINE_STORAGE_KEY, RoutineData, sortedEvents, STORAGE_KEY, TrackedItem, upgradeProgressData, validItems, validProgressData, validRoutineData,
 } from "@/lib/tracker";
 import { AuthPanel } from "@/app/auth-panel";
 import { CalendarView } from "@/app/calendar-view";
@@ -445,7 +445,7 @@ export default function Home() {
         const savedProgress = localStorage.getItem(PROGRESS_STORAGE_KEY);
         if (savedProgress) {
           const parsedProgress: unknown = JSON.parse(savedProgress);
-          if (validProgressData(parsedProgress)) setProgressData(parsedProgress);
+          if (validProgressData(parsedProgress)) setProgressData(upgradeProgressData(parsedProgress));
         }
       } catch {
         setNotice("Your saved record could not be read. You can restore a backup to continue.");
@@ -1129,7 +1129,22 @@ export default function Home() {
         } catch { return { ...photo, photo: undefined, photoPath: undefined }; }
       })),
     })));
-    const backup: BackupFile = { format: "kept-backup", version: 2, exportedAt: new Date().toISOString(), items: backupItems, routine: { ...routineData, products: backupProducts }, progress: { tracks: backupTracks } };
+    const backupCatalog = await Promise.all((progressData.catalog ?? []).map(async (product) => {
+      if (!product.photo || product.photo.startsWith("data:image/")) return { ...product, photoPath: undefined };
+      try {
+        let source = product.photo;
+        if (product.photoPath && user) {
+          const { data: signed } = await createClient().storage.from("product-photos").createSignedUrl(product.photoPath, 60 * 5);
+          source = signed?.signedUrl ?? source;
+        }
+        const response = await fetch(source);
+        if (!response.ok) return { ...product, photo: undefined, photoPath: undefined };
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+        return { ...product, photo: dataUrl, photoPath: undefined };
+      } catch { return { ...product, photo: undefined, photoPath: undefined }; }
+    }));
+    const backup: BackupFile = { format: "kept-backup", version: 2, exportedAt: new Date().toISOString(), items: backupItems, routine: { ...routineData, products: backupProducts }, progress: { tracks: backupTracks, catalog: backupCatalog } };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -1221,7 +1236,7 @@ export default function Home() {
       setItems(restored);
       const restoredRoutine = parsed.routine && validRoutineData(parsed.routine) ? parsed.routine : EMPTY_ROUTINE_DATA;
       setRoutineData(user ? { ...restoredRoutine, products: restoredRoutine.products.map((product) => ({ ...product, linkedItemId: product.linkedItemId ? restoredIdMap.get(product.linkedItemId) ?? product.linkedItemId : undefined })) } : restoredRoutine);
-      const restoredProgress = parsed.progress && validProgressData(parsed.progress) ? parsed.progress : EMPTY_PROGRESS_DATA;
+      const restoredProgress = parsed.progress && validProgressData(parsed.progress) ? upgradeProgressData(parsed.progress) : EMPTY_PROGRESS_DATA;
       setProgressData(restoredProgress);
       if (user) {
         const previousProgress = lastSyncedProgress.current;
@@ -1475,7 +1490,7 @@ export default function Home() {
       </> : null}
       <div className="calendar-keep-alive" hidden={view !== "calendar"}><CalendarView items={items} onOpenItem={openCalendarItem} isMobileLayout={isMobileLayout} /></div>
       <div className="routine-keep-alive" hidden={view !== "routine"}><RoutineView data={routineData} onChange={setRoutineData} items={items} /></div>
-      <div className="progress-keep-alive" hidden={view !== "progress"}><ProgressView data={progressData} onChange={setProgressData} items={items} routine={routineData} /></div>
+      <div className="progress-keep-alive" hidden={view !== "progress"}><ProgressView data={progressData} onChange={setProgressData} items={items} routine={routineData} userId={user?.id} /></div>
       </div>
 
       <nav className="mobile-tabbar" aria-label="Primary navigation">

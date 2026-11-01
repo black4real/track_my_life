@@ -491,6 +491,7 @@ a { color: inherit; }
 .progress-tabs button { min-height: 44px; padding: 0 17px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .progress-tabs button.active { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px rgb(0 0 0 / 12%); }
 .progress-overview-heading { align-items: end; padding: 32px 0 22px; }
+.progress-overview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .progress-overview-heading h2, .progress-detail-heading h2 { margin: 4px 0; font-size: clamp(32px, 4vw, 54px); letter-spacing: -.055em; }
 .progress-track-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .progress-track-card { display: grid; grid-template-columns: 104px minmax(0, 1fr) 24px; gap: 17px; align-items: center; min-width: 0; padding: 14px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper-deep); color: var(--ink); text-align: left; cursor: pointer; }
@@ -509,6 +510,20 @@ a { color: inherit; }
 .progress-past-tracks { margin-top: 28px; border-top: 1px solid var(--rule); }
 .progress-past-tracks summary { display: flex; gap: 10px; padding: 17px 0; color: var(--ink-soft); cursor: pointer; }
 .progress-past-tracks .progress-track-grid { padding-bottom: 20px; }
+.progress-saved-shelf { padding: 25px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.progress-saved-shelf > .progress-section-heading > div > p:last-child { margin: 6px 0 0; color: var(--muted); }
+.progress-saved-shelf > .progress-section-heading > span { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.progress-saved-product-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.progress-saved-product { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: center; min-width: 0; padding: 9px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper-deep); }
+.progress-saved-product-photo { display: grid; place-items: center; width: 58px; height: 58px; overflow: hidden; background: var(--paper); color: var(--leaf-strong); font-size: 24px; }
+.progress-saved-product-photo img { width: 100%; height: 100%; object-fit: contain; }
+.progress-saved-product > span:last-child { display: grid; gap: 3px; min-width: 0; }
+.progress-saved-product > span:last-child small { color: var(--leaf-strong); font: 9px var(--font-mono); letter-spacing: .06em; }
+.progress-saved-product strong { overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.progress-saved-product > span:last-child > span { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.progress-draft-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0; padding: 12px 15px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper-deep); }
+.progress-draft-notice > span { display: grid; gap: 3px; }
+.progress-draft-notice small, .draft-status { color: var(--muted); font-size: 12px; }
 .progress-detail { padding-top: 23px; }
 .progress-back { margin-bottom: 24px; }
 .progress-detail-heading { align-items: center; padding: 12px 0 24px; border-bottom: 1px solid var(--rule); }
@@ -565,6 +580,7 @@ a { color: inherit; }
 .progress-upload-preview { width: min(100%, 500px); max-height: 400px; object-fit: contain; background: var(--paper); }
 @media (max-width: 850px) {
   .progress-track-grid { grid-template-columns: 1fr; }
+  .progress-saved-product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .progress-view { padding-inline: 20px; }
 }
 @media (max-width: 600px) {
@@ -574,6 +590,8 @@ a { color: inherit; }
   .progress-tabs { display: grid; grid-template-columns: 1fr 1fr; }
   .progress-tabs button { padding-inline: 8px; }
   .progress-overview-heading .button { align-self: start; }
+  .progress-overview-actions { width: 100%; }
+  .progress-overview-actions .button { flex: 1; padding-inline: 9px; }
   .progress-track-card { grid-template-columns: 74px minmax(0, 1fr) 18px; gap: 11px; padding: 10px; }
   .progress-card-body strong { font-size: 16px; }
   .progress-card-body > span { font-size: 13px; }
@@ -588,6 +606,8 @@ a { color: inherit; }
   .progress-comparison figure { padding: 5px; }
   .progress-comparison figcaption { font-size: 12px; }
   .progress-section-heading { align-items: flex-start; }
+  .progress-saved-product-grid { grid-template-columns: 1fr; }
+  .progress-draft-notice { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 760px), (pointer: coarse) and (max-width: 920px) {
   .item-row-wrap > .manage-menu { margin-right: 0; }
