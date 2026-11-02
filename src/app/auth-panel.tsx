@@ -2,10 +2,12 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export function AuthPanel({ email }: { email?: string }) {
-  const [mode, setMode] = useState<"sign-in" | "sign-up" | "reset">("sign-in");
+export function AuthPanel({ initialMode = "sign-in", email }: { initialMode?: "sign-in" | "sign-up"; email?: string }) {
+  const router = useRouter();
+  const [mode, setMode] = useState<"sign-in" | "sign-up" | "reset">(initialMode);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -39,13 +41,18 @@ export function AuthPanel({ email }: { email?: string }) {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: address,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/` },
         });
         if (signUpError) throw signUpError;
-        if (!data.session) setMessage("Account created. Check your email to confirm it, then come back to sign in.");
+        if (data.session) {
+          router.replace("/");
+          router.refresh();
+        } else setMessage("Account created. Check your email to confirm it, then come back to sign in.");
       } else {
         const { error: loginError } = await supabase.auth.signInWithPassword({ email: address, password });
         if (loginError) throw loginError;
+        router.replace("/");
+        router.refresh();
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not complete sign in. Try again.");
@@ -56,7 +63,7 @@ export function AuthPanel({ email }: { email?: string }) {
     setBusy(true); setError("");
     const { error: oauthError } = await createClient().auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=/` },
     });
     if (oauthError) { setError(oauthError.message); setBusy(false); }
   }
@@ -66,8 +73,8 @@ export function AuthPanel({ email }: { email?: string }) {
     <header className="auth-topbar"><Link className="wordmark" href="/"><span className="brand-mark">k.</span><span>kept</span></Link><span className="topbar-note"><span className="status-dot" /> YOUR PERSONAL LEDGER</span><button className="quiet-button theme-button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>{theme === "dark" ? "Light mode" : "Dark mode"}</button></header>
     <section className="auth-card" aria-labelledby="auth-title">
       <p className="eyebrow">A SMALL RECORD OF WHAT STAYS</p>
-      <h1 id="auth-title">Your things,<br /><em>kept close.</em></h1>
-      <p className="auth-copy">Sign in to see your library on all your devices.</p>
+      <h1 id="auth-title">{mode === "sign-up" ? <>Start your<br /><em>Kept account.</em></> : mode === "reset" ? <>A fresh<br /><em>start.</em></> : <>Your things,<br /><em>kept close.</em></>}</h1>
+      <p className="auth-copy">{mode === "sign-up" ? "One account for the things, routines, and progress you want to remember." : mode === "reset" ? "We’ll send a secure link to reset your password." : "Sign in to see your library on all your devices."}</p>
       {email ? <p className="auth-invite-note">You’re signed in as {email}.</p> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {message ? <p className="auth-message" role="status">{message}</p> : null}

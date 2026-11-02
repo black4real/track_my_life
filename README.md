@@ -44,7 +44,22 @@ Without Supabase environment values, Kept remains in local-browser mode. Follow 
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
    ```
 
-7. Add the same two values to the Vercel project's Environment Variables, then redeploy. Do not put a Supabase `service_role` or secret key in this app or in a `NEXT_PUBLIC_` variable. Google OAuth credentials belong in Supabase's provider settings.
+7. Add the same two values to the Vercel project's Environment Variables, then redeploy. Never commit a Supabase `service_role` or secret key or expose one in a `NEXT_PUBLIC_` variable. Google OAuth credentials belong in Supabase's provider settings.
+
+## Optional admin account page
+
+The `/admin` page reuses Supabase sign-in. There is no separate shared admin password. Admin access is granted only to email addresses listed in `ADMIN_EMAILS`, and the server checks that allowlist before using the Supabase admin API. The page can list accounts and pause or restore sign-in access; it cannot view private tracker records or photos.
+
+To enable it:
+
+1. In Supabase, open **Project Settings → API Keys** and copy the `service_role` key. Treat it like a password.
+2. In Vercel, open your project’s **Settings → Environment Variables**.
+3. Add `ADMIN_EMAILS` with the email address of the existing Supabase account you want to administer with. For multiple administrators, separate email addresses with commas.
+4. Add `SUPABASE_SERVICE_ROLE_KEY` with the `service_role` key. Leave it as a regular server environment variable; do not use a `NEXT_PUBLIC_` name.
+5. Select Production (and Preview if you want admin access on preview builds), save, then redeploy the latest deployment.
+6. Sign into Kept with that exact email, then open `/admin` on your site.
+
+The admin area is intentionally unavailable until both values are configured. Never commit the real key to GitHub, paste it into chat, or put it in a browser-visible variable. If it is ever exposed, rotate it in Supabase immediately.
 
 8. Optional: to use Flipkart's official product lookup, register for the [Flipkart Affiliate APIs](https://affiliate.flipkart.com/api-docs/af_register.html), then set `FLIPKART_AFFILIATE_ID` and `FLIPKART_AFFILIATE_TOKEN` in `.env.local` and Vercel's server-side Environment Variables. Never prefix these with `NEXT_PUBLIC_`. Kept otherwise falls back to public product-page metadata. Flipkart credentials are not required to run the app.
 
@@ -69,7 +84,7 @@ Run `npm run build` before `npm run start`.
 
 ## Data and privacy
 
-When Supabase is configured, each authenticated account can access only its own item records and product photos. The browser never receives an admin or service-role secret. Your theme stays in this browser. If Supabase is not configured, records continue to use this browser's local storage as before.
+When Supabase is configured, each authenticated account can access only its own item records and product photos. The browser never receives an admin or service-role secret. If you enable the optional account admin page, its service-role key is read only by server-side admin routes after the signed-in email passes the allowlist check. Your theme stays in this browser. If Supabase is not configured, records continue to use this browser's local storage as before.
 
 Product previews are requested by the app's server from public HTTPS product pages. When the optional affiliate credentials are configured, Flipkart product IDs are looked up through its official API first. Other links use public Open Graph, Twitter Card, and Schema.org metadata. Kept does not log in to shops or bypass their protections. A price is saved only when the page/API exposes an unambiguous amount; ambiguous variants leave price blank. Checks happen when you open an item or refresh manually, with no scheduled polling. If a shop blocks reads, the last good data remains and you can edit the photo and listed price. The purchase amount you actually paid stays separate from the fetched listed price. The optional delivery PIN is saved in your Supabase account metadata; currently the public-page readers do not send it to shops.
 
