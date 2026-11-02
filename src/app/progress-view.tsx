@@ -4,10 +4,10 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { formatDate, makeId, ProgressCatalogProduct, ProgressCheckIn, ProgressData, ProgressPhoto, ProgressProduct, ProgressTrack, RoutineData, TrackedItem } from "@/lib/tracker";
+import { formatDate, makeId, ProgressCatalogProduct, ProgressCheckIn, ProgressData, ProgressPhoto, ProgressProduct, ProgressTrack, RoutineData, TrackedItem, WorkoutSession } from "@/lib/tracker";
 
 type Props = { data: ProgressData; onChange: (data: ProgressData) => void; items: TrackedItem[]; routine: RoutineData; userId?: string };
-type ProgressTab = "skin" | "supplement";
+type ProgressTab = "skin" | "supplement" | "workout";
 type ProgressDraft = { kind: string; fields: Record<string, string>; photoData?: string; selectedTrackId?: string; tab: ProgressTab; savedAt: string };
 
 function localToday() {
@@ -72,6 +72,43 @@ function ProductChooser({ items, routine, catalog, kind, onPick, onCustom }: { i
       <span className="progress-product-choice-image">{choice.image ? <img src={choice.image} alt="" /> : choice.name.slice(0, 1).toUpperCase()}</span><span><strong>{choice.name}</strong><small>{choice.brand || (choice.id.startsWith("catalog:") ? "Saved product" : choice.linkedItemId ? "From Library" : "From Routine")}</small></span><span aria-hidden="true">＋</span>
     </button>)}</div> : <p className="progress-empty">Your Library and Routine have no products yet. Add one by name below.</p>}
     <button type="button" className="text-button progress-custom-link" onClick={onCustom}>＋ Add a custom product</button>
+  </div>;
+}
+
+function WorkoutProgress({ data, onChange }: { data: ProgressData; onChange: (next: ProgressData) => void }) {
+  const [showPlan, setShowPlan] = useState(false);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [showSession, setShowSession] = useState(false);
+  const active = data.tracks.filter((track) => track.kind === "workout" && track.status === "active");
+  const past = data.tracks.filter((track) => track.kind === "workout" && track.status === "completed");
+  const selected = data.tracks.find((track) => track.kind === "workout" && track.id === activeTrackId) ?? null;
+  function addPlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("planName") ?? "").trim();
+    if (!name) return;
+    const now = new Date().toISOString();
+    const track: ProgressTrack = { id: makeId(), kind: "workout", name, areas: [], startedOn: String(form.get("startedOn") ?? "") || localToday(), notes: String(form.get("planNotes") ?? "").trim() || undefined, status: "active", createdAt: now, products: [], photos: [], checkIns: [], workoutSessions: [] };
+    onChange({ ...data, tracks: [track, ...data.tracks] });
+    setActiveTrackId(track.id); setShowPlan(false); event.currentTarget.reset();
+  }
+  function addSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    const session: WorkoutSession = { id: makeId(), date: String(form.get("sessionDate") ?? localToday()), exercise: String(form.get("exercise") ?? "").trim(), sets: Number(form.get("sets")) || undefined, reps: Number(form.get("reps")) || undefined, weight: Number(form.get("weight")) || undefined, weightUnit: String(form.get("weightUnit") ?? "kg"), distance: Number(form.get("distance")) || undefined, distanceUnit: String(form.get("distanceUnit") ?? "km"), durationMinutes: Number(form.get("duration")) || undefined, note: String(form.get("sessionNote") ?? "").trim() || undefined, createdAt: new Date().toISOString() };
+    if (!session.exercise) return;
+    onChange({ ...data, tracks: data.tracks.map((track) => track.id === selected.id ? { ...track, workoutSessions: [...(track.workoutSessions ?? []), session].sort((a, b) => a.date.localeCompare(b.date)) } : track) });
+    setShowSession(false); event.currentTarget.reset();
+  }
+  return <div className="workout-progress">
+    <div className="progress-section-heading workout-heading"><div><p className="eyebrow">TRAINING LOG</p><h2>Workouts<span className="period">.</span></h2><p>Keep sessions together and see your lifts, reps, distance, or time build.</p></div><button type="button" className="button button-primary" onClick={() => setShowPlan((value) => !value)}>＋ New training log</button></div>
+    {showPlan ? <form className="progress-form" onSubmit={addPlan}><div className="progress-form-heading"><strong>Start a training log</strong><button type="button" className="text-button" onClick={() => setShowPlan(false)}>Close</button></div><label className="field"><span>Name</span><input name="planName" maxLength={120} placeholder="e.g. Strength training" required /></label><label className="field"><span>Started</span><input name="startedOn" type="date" max={localToday()} defaultValue={localToday()} /></label><label className="field"><span>Focus <b>OPTIONAL</b></span><input name="planNotes" maxLength={500} placeholder="e.g. Build consistency, 3 days a week" /></label><button className="button button-primary" type="submit">Create training log</button></form> : null}
+    {selected ? <section className="workout-detail"><button className="mobile-back-button" type="button" onClick={() => { setActiveTrackId(null); setShowSession(false); }}>← All training logs</button><div className="progress-detail-heading"><div><p className="eyebrow">{selected.startedOn ? `STARTED ${formatDate(selected.startedOn)}` : "TRAINING LOG"}</p><h3>{selected.name}<span className="period">.</span></h3>{selected.notes ? <p>{selected.notes}</p> : null}</div><button type="button" className="text-button" onClick={() => onChange({ ...data, tracks: data.tracks.map((track) => track.id === selected.id ? { ...track, status: track.status === "active" ? "completed" : "active" } : track) })}>{selected.status === "active" ? "Finish log" : "Reopen log"}</button></div><div className="workout-session-heading"><div><p className="eyebrow">YOUR SESSIONS</p><h4>Progression<span className="period">.</span></h4></div><button className="button button-outline" type="button" onClick={() => setShowSession((value) => !value)}>＋ Log a session</button></div>
+      {showSession ? <form className="progress-form workout-session-form" onSubmit={addSession}><div className="progress-form-heading"><strong>Session details</strong><button type="button" className="text-button" onClick={() => setShowSession(false)}>Close</button></div><div className="field-pair"><label className="field"><span>Date</span><input type="date" name="sessionDate" max={localToday()} defaultValue={localToday()} required /></label><label className="field"><span>Exercise</span><input name="exercise" maxLength={160} placeholder="e.g. Bench press" required /></label></div><div className="field-pair workout-metrics"><label className="field"><span>Sets</span><input type="number" inputMode="numeric" name="sets" min="1" placeholder="3" /></label><label className="field"><span>Reps</span><input type="number" inputMode="numeric" name="reps" min="1" placeholder="8" /></label><label className="field"><span>Weight</span><input type="number" inputMode="decimal" name="weight" min="0" step="0.25" placeholder="40" /></label><label className="field"><span>Unit</span><select name="weightUnit"><option>kg</option><option>lb</option></select></label></div><div className="field-pair workout-metrics"><label className="field"><span>Distance <b>OPTIONAL</b></span><input type="number" inputMode="decimal" name="distance" min="0" step="0.1" placeholder="2" /></label><label className="field"><span>Distance unit</span><select name="distanceUnit"><option>km</option><option>mi</option><option>m</option></select></label><label className="field"><span>Minutes <b>OPTIONAL</b></span><input type="number" inputMode="numeric" name="duration" min="1" placeholder="30" /></label></div><label className="field"><span>Notes <b>OPTIONAL</b></span><textarea name="sessionNote" rows={2} maxLength={2000} placeholder="How it felt, form notes, anything to remember" /></label><button type="submit" className="button button-primary">Save session</button></form> : null}
+      {(selected.workoutSessions ?? []).length ? <ol className="workout-session-list">{[...(selected.workoutSessions ?? [])].sort((a, b) => b.date.localeCompare(a.date)).map((session) => <li key={session.id}><time>{formatDate(session.date)}</time><strong>{session.exercise}</strong><span>{[session.sets && session.reps ? `${session.sets} × ${session.reps}` : null, session.weight ? `${session.weight} ${session.weightUnit ?? "kg"}` : null, session.distance ? `${session.distance} ${session.distanceUnit ?? "km"}` : null, session.durationMinutes ? `${session.durationMinutes} min` : null].filter(Boolean).join(" · ") || "Session logged"}</span>{session.note ? <p>{session.note}</p> : null}</li>)}</ol> : <div className="progress-empty"><strong>No sessions yet.</strong><p>Log an exercise with the numbers you care about. You can add different exercises over time.</p><button className="button button-primary" type="button" onClick={() => setShowSession(true)}>＋ Log first session</button></div>}
+    </section> : <div className="workout-log-grid">{active.length ? active.map((track) => <button type="button" key={track.id} className="progress-track-card" onClick={() => setActiveTrackId(track.id)}><span className="progress-card-photo"><span>↗</span></span><span className="progress-card-body"><small>{track.startedOn ? `SINCE ${formatDate(track.startedOn)}` : "TRAINING LOG"}</small><strong>{track.name}</strong><span>{track.notes || "Training progression"}</span><span>{(track.workoutSessions ?? []).length} session{(track.workoutSessions ?? []).length === 1 ? "" : "s"}</span></span><span className="progress-card-arrow">→</span></button>) : <div className="progress-empty"><span className="empty-glyph">↗</span><strong>Start your first training log.</strong><p>Track strength, running, cycling, or any movement. Add only the numbers that matter to you.</p><button type="button" className="button button-primary" onClick={() => setShowPlan(true)}>＋ New training log</button></div>}</div>}
+    {past.length ? <details className="progress-past-tracks"><summary>Past training logs <span>{past.length}</span></summary><div className="workout-log-grid">{past.map((track) => <button type="button" key={track.id} className="progress-track-card" onClick={() => setActiveTrackId(track.id)}><span className="progress-card-photo"><span>↗</span></span><span className="progress-card-body"><small>PAST</small><strong>{track.name}</strong><span>{(track.workoutSessions ?? []).length} sessions saved</span></span></button>)}</div></details> : null}
   </div>;
 }
 
@@ -323,7 +360,7 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
     event.preventDefault();
     if (!selected) return;
     const catalog = [...(data.catalog ?? [])];
-    const product = newProductFromForm(new FormData(event.currentTarget), new Date().toISOString(), tab, catalog);
+    const product = newProductFromForm(new FormData(event.currentTarget), new Date().toISOString(), tab === "workout" ? "skin" : tab, catalog);
     if (!product) { setPhotoError("Choose a saved product or enter a product name."); return; }
     let nextCatalog = catalog;
     if (customProductForm && catalogPhotoData) {
@@ -363,10 +400,11 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
     <header className="progress-header"><div><p className="eyebrow">YOUR PERSONAL CHECKPOINTS</p><h1 id="progress-title">Progress<span className="period">.</span></h1><p>Small records of what you use and how things change over time.</p></div><div className="progress-tabs" role="tablist" aria-label="Progress journals">
       <button type="button" role="tab" aria-selected={tab === "skin"} className={tab === "skin" ? "active" : ""} onClick={() => { setTab("skin"); setSelectedId(null); setShowTrackForm(false); }}>Skin</button>
       <button type="button" role="tab" aria-selected={tab === "supplement"} className={tab === "supplement" ? "active" : ""} onClick={() => { setTab("supplement"); setSelectedId(null); setShowTrackForm(false); }}>Supplements</button>
+      <button type="button" role="tab" aria-selected={tab === "workout"} className={tab === "workout" ? "active" : ""} onClick={() => { setTab("workout"); setSelectedId(null); setShowTrackForm(false); }}>Workout</button>
     </div></header>
     {draftSavedAt && !showTrackForm && !showCatalogForm && !showPhotoForm && !showProductForm ? <div className="progress-draft-notice"><span><strong>Unfinished form saved.</strong><small>On this device · {formatDate(draftSavedAt.slice(0, 10))}</small></span><button className="button button-outline" type="button" onClick={resumeDraft}>Resume draft</button></div> : null}
 
-    {selected ? <div className="progress-detail">
+    {tab === "workout" ? <WorkoutProgress data={data} onChange={onChange} /> : selected ? <div className="progress-detail">
       <button type="button" className="mobile-back-button progress-back" onClick={() => { setSelectedId(null); setShowPhotoForm(false); setShowProductForm(false); }}>← All {tab === "skin" ? "skin journeys" : "supplements"}</button>
       <div className="progress-detail-heading"><div><p className="eyebrow">{tab === "skin" ? selected.areas.join(" · ") || "SKIN JOURNEY" : "SUPPLEMENT JOURNEY"}</p><h2>{selected.name}<span className="period">.</span></h2><p>{trackStart(selected) ? `Day ${dayNumber(localToday(), trackStart(selected)!)}` : "Add a start date or first check-in to begin counting days."}{selected.status === "completed" ? " · Past journey" : ""}</p></div><button type="button" className="text-button" onClick={() => changeTrack(selected.id, (track) => ({ ...track, status: track.status === "active" ? "completed" : "active" }))}>{selected.status === "active" ? "Finish journey" : "Reopen journey"}</button></div>
 

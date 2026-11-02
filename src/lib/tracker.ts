@@ -89,7 +89,7 @@ export type BackupFile = {
   progress?: ProgressData;
 };
 
-export type ProgressKind = "skin" | "supplement";
+export type ProgressKind = "skin" | "supplement" | "workout";
 export type ProgressProduct = {
   id: string;
   name: string;
@@ -128,6 +128,7 @@ export type ProgressCheckIn = {
   note?: string;
   createdAt: string;
 };
+export type WorkoutSession = { id: string; date: string; exercise: string; sets?: number; reps?: number; weight?: number; weightUnit?: string; distance?: number; distanceUnit?: string; durationMinutes?: number; note?: string; createdAt: string };
 export type ProgressTrack = {
   id: string;
   kind: ProgressKind;
@@ -140,6 +141,7 @@ export type ProgressTrack = {
   products: ProgressProduct[];
   photos: ProgressPhoto[];
   checkIns: ProgressCheckIn[];
+  workoutSessions?: WorkoutSession[];
 };
 export type ProgressData = { tracks: ProgressTrack[]; catalog?: ProgressCatalogProduct[] };
 
@@ -149,7 +151,7 @@ export const EMPTY_PROGRESS_DATA: ProgressData = { tracks: [], catalog: [] };
 function validProgressCatalogProduct(product: unknown): product is ProgressCatalogProduct {
   if (!product || typeof product !== "object") return false;
   const entry = product as Partial<ProgressCatalogProduct>;
-  return typeof entry.id === "string" && ["skin", "supplement"].includes(entry.kind ?? "") && typeof entry.name === "string" && entry.name.trim().length > 0 && entry.name.length <= 160 && typeof entry.createdAt === "string"
+  return typeof entry.id === "string" && ["skin", "supplement", "workout"].includes(entry.kind ?? "") && typeof entry.name === "string" && entry.name.trim().length > 0 && entry.name.length <= 160 && typeof entry.createdAt === "string"
     && (entry.brand === undefined || (typeof entry.brand === "string" && entry.brand.length <= 100))
     && (entry.photo === undefined || (typeof entry.photo === "string" && entry.photo.length <= 12_000_000 && (/^data:image\/(?:jpeg|webp|png);base64,/i.test(entry.photo) || /^https:\/\//i.test(entry.photo))))
     && (entry.photoPath === undefined || (typeof entry.photoPath === "string" && entry.photoPath.length <= 500 && !entry.photoPath.startsWith("/") && !entry.photoPath.includes("..")));
@@ -162,28 +164,34 @@ export function validProgressData(value: unknown): value is ProgressData {
   const catalog = (value as Partial<ProgressData>).catalog;
   if (catalog !== undefined && (!Array.isArray(catalog) || !catalog.every(validProgressCatalogProduct))) return false;
   return tracks.every((track) => {
-    if (!track || typeof track !== "object" || !["skin", "supplement"].includes(track.kind) || !["active", "completed"].includes(track.status)) return false;
+    if (!track || typeof track !== "object" || !["skin", "supplement", "workout"].includes(track.kind) || !["active", "completed"].includes(track.status)) return false;
     if (typeof track.id !== "string" || typeof track.name !== "string" || !track.name.trim() || track.name.length > 120 || !Array.isArray(track.areas) || !track.areas.every((area) => typeof area === "string" && area.length <= 80) || typeof track.createdAt !== "string" || !Array.isArray(track.products) || !Array.isArray(track.photos) || !Array.isArray(track.checkIns)) return false;
     const productsValid = track.products.every((product) => product && typeof product.id === "string" && typeof product.name === "string" && product.name.trim().length > 0 && product.name.length <= 160 && typeof product.createdAt === "string" && (product.brand === undefined || (typeof product.brand === "string" && product.brand.length <= 100)) && (product.dose === undefined || (typeof product.dose === "string" && product.dose.length <= 120)) && (product.linkedItemId === undefined || typeof product.linkedItemId === "string") && (product.linkedRoutineProductId === undefined || typeof product.linkedRoutineProductId === "string") && (product.catalogProductId === undefined || typeof product.catalogProductId === "string"));
     const photosValid = track.photos.every((photo) => photo && typeof photo.id === "string" && typeof photo.date === "string" && typeof photo.createdAt === "string" && (photo.photo === undefined || (typeof photo.photo === "string" && photo.photo.length <= 12_000_000 && (/^data:image\/(?:jpeg|webp|png);base64,/i.test(photo.photo) || /^https:\/\//i.test(photo.photo)))) && (photo.photoPath === undefined || (typeof photo.photoPath === "string" && photo.photoPath.length <= 500 && !photo.photoPath.startsWith("/") && !photo.photoPath.includes(".."))) && (photo.periodDays === undefined || (Number.isInteger(photo.periodDays) && photo.periodDays >= 0 && photo.periodDays <= 10000)) && (photo.note === undefined || (typeof photo.note === "string" && photo.note.length <= 2000)) && (photo.usageCounts === undefined || (!!photo.usageCounts && typeof photo.usageCounts === "object" && !Array.isArray(photo.usageCounts) && Object.entries(photo.usageCounts).every(([id, count]) => typeof id === "string" && Number.isInteger(count) && count >= 0 && count <= 10000))));
     const checkInsValid = track.checkIns.every((checkIn) => checkIn && typeof checkIn.id === "string" && typeof checkIn.productId === "string" && typeof checkIn.date === "string" && typeof checkIn.used === "boolean" && typeof checkIn.createdAt === "string" && (checkIn.feeling === undefined || (typeof checkIn.feeling === "string" && checkIn.feeling.length <= 80)) && (checkIn.note === undefined || (typeof checkIn.note === "string" && checkIn.note.length <= 2000)));
-    return productsValid && photosValid && checkInsValid && (track.startedOn === undefined || typeof track.startedOn === "string") && (track.notes === undefined || (typeof track.notes === "string" && track.notes.length <= 2000));
+    const sessions = track.workoutSessions ?? [];
+    const sessionsValid = Array.isArray(sessions) && sessions.every((entry) => entry && typeof entry.id === "string" && typeof entry.date === "string" && typeof entry.exercise === "string" && entry.exercise.length <= 160 && typeof entry.createdAt === "string" && ["sets", "reps", "weight", "distance", "durationMinutes"].every((key) => (entry as unknown as Record<string, unknown>)[key] === undefined || (typeof (entry as unknown as Record<string, unknown>)[key] === "number" && Number.isFinite((entry as unknown as Record<string, number>)[key]))) && (entry.note === undefined || (typeof entry.note === "string" && entry.note.length <= 2000)));
+    return productsValid && photosValid && checkInsValid && sessionsValid && (track.startedOn === undefined || typeof track.startedOn === "string") && (track.notes === undefined || (typeof track.notes === "string" && track.notes.length <= 2000));
   });
 }
 
 export function upgradeProgressData(data: ProgressData): ProgressData {
   const catalog = [...(data.catalog ?? [])];
-  const tracks = data.tracks.map((track) => ({
+  const tracks = data.tracks.map((track) => {
+    if (track.kind === "workout") return track;
+    const kind: "skin" | "supplement" = track.kind;
+    return {
     ...track,
     products: track.products.map((product) => {
       if (product.catalogProductId && catalog.some((entry) => entry.id === product.catalogProductId)) return product;
       if (product.linkedItemId || product.linkedRoutineProductId) return product;
-      const saved = catalog.find((entry) => entry.kind === track.kind && entry.name.toLowerCase() === product.name.toLowerCase() && (entry.brand ?? "").toLowerCase() === (product.brand ?? "").toLowerCase());
-      const entry = saved ?? { id: makeId(), kind: track.kind, name: product.name, brand: product.brand, createdAt: product.createdAt };
+      const saved = catalog.find((entry) => entry.kind === kind && entry.name.toLowerCase() === product.name.toLowerCase() && (entry.brand ?? "").toLowerCase() === (product.brand ?? "").toLowerCase());
+      const entry: ProgressCatalogProduct = saved ?? { id: makeId(), kind, name: product.name, brand: product.brand, createdAt: product.createdAt };
       if (!saved) catalog.push(entry);
       return { ...product, catalogProductId: entry.id };
     }),
-  }));
+  };
+  });
   return { tracks, catalog };
 }
 

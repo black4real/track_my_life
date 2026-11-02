@@ -490,6 +490,21 @@ a { color: inherit; }
 .progress-tabs { display: flex; gap: 5px; padding: 5px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper-deep); }
 .progress-tabs button { min-height: 44px; padding: 0 17px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .progress-tabs button.active { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px rgb(0 0 0 / 12%); }
+.workout-progress { display: grid; gap: 24px; }
+.workout-heading { margin: 24px 0 8px; }
+.workout-heading h2 { margin: 4px 0; font-size: clamp(34px, 4vw, 54px); letter-spacing: -.055em; }
+.workout-heading > div > p:last-child { max-width: 52ch; color: var(--muted); }
+.workout-detail { display: grid; gap: 22px; }
+.workout-session-heading { display: flex; justify-content: space-between; align-items: end; gap: 18px; padding-top: 20px; border-top: 1px solid var(--rule); }
+.workout-session-heading h4 { margin: 4px 0 0; font-size: clamp(26px, 3vw, 38px); letter-spacing: -.04em; }
+.workout-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.workout-session-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.workout-session-list li { display: grid; grid-template-columns: minmax(110px, .55fr) minmax(150px, 1fr) minmax(180px, 1fr); align-items: center; gap: 12px 20px; padding: 18px 8px; border-bottom: 1px solid var(--rule); }
+.workout-session-list time { color: var(--muted); font-family: var(--font-mono); font-size: 13px; }
+.workout-session-list strong { font-size: 19px; }
+.workout-session-list li > span { color: var(--accent); }
+.workout-session-list li p { grid-column: 2 / -1; margin: 0; color: var(--muted); }
+.workout-log-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .progress-overview-heading { align-items: end; padding: 32px 0 22px; }
 .progress-overview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .progress-overview-heading h2, .progress-detail-heading h2 { margin: 4px 0; font-size: clamp(32px, 4vw, 54px); letter-spacing: -.055em; }
@@ -587,8 +602,14 @@ a { color: inherit; }
   .progress-view { padding: 20px 16px 28px; }
   .progress-header, .progress-overview-heading { align-items: stretch; flex-direction: column; gap: 14px; }
   .progress-header h1 { font-size: clamp(48px, 16vw, 72px); }
-  .progress-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+  .progress-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .progress-tabs button { padding-inline: 8px; }
+  .workout-heading, .workout-session-heading { align-items: flex-start; flex-direction: column; }
+  .workout-heading > .button { width: 100%; }
+  .workout-log-grid { grid-template-columns: 1fr; }
+  .workout-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workout-session-list li { grid-template-columns: 1fr; gap: 6px; }
+  .workout-session-list li p { grid-column: auto; }
   .progress-overview-heading .button { align-self: start; }
   .progress-overview-actions { width: 100%; }
   .progress-overview-actions .button { flex: 1; padding-inline: 9px; }
