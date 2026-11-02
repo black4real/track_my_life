@@ -595,6 +595,9 @@ a { color: inherit; }
 .progress-photo-image { position: relative; overflow: hidden; border-radius: 5px; background: var(--paper-deep); }
 .progress-photo-image img { display: block; width: 100%; max-height: 540px; object-fit: contain; }
 .progress-compare-select { position: absolute; right: 10px; bottom: 10px; background: color-mix(in srgb, var(--paper) 92%, transparent); }
+.progress-photo-copy .progress-compare-select { position: static; margin: 4px 0 8px; }
+.progress-photo-image.progress-photo-strip, .progress-photo-strip { display: flex; align-items: flex-start; gap: 8px; overflow-x: auto; overscroll-behavior-inline: contain; padding: 8px; scrollbar-width: thin; }
+.progress-photo-image.progress-photo-strip img, .progress-photo-strip img { flex: 0 0 auto; width: clamp(150px, 18vw, 250px); height: clamp(210px, 26vw, 330px); max-height: none; object-fit: contain; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; }
 .progress-photo-copy { padding: 6px 0; }
 .progress-photo-copy h4 { margin: 5px 0; font-size: 23px; }
 .progress-photo-copy p { color: var(--muted); line-height: 1.6; }
@@ -602,6 +605,9 @@ a { color: inherit; }
 .progress-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 17px 0; }
 .progress-comparison figure { min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--rule); background: var(--paper-deep); }
 .progress-comparison img { width: 100%; max-height: 440px; object-fit: contain; }
+.progress-date-comparison > figure { min-width: 0; }
+.progress-date-comparison > figure > figcaption { margin: 0 0 8px; color: var(--ink); font-size: 16px; }
+.progress-date-comparison .progress-photo-strip img { width: clamp(130px, 15vw, 210px); height: clamp(190px, 22vw, 280px); }
 .progress-comparison figcaption { padding-top: 8px; color: var(--muted); }
 .progress-photo-empty { padding: 22px; border: 1px dashed var(--rule-strong); }
 .progress-upload-preview { width: min(100%, 500px); max-height: 400px; object-fit: contain; background: var(--paper); }
