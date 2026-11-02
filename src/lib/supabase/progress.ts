@@ -3,7 +3,7 @@ import { EMPTY_PROGRESS_DATA, ProgressCatalogProduct, ProgressData, ProgressPhot
 
 const PHOTO_BUCKET = "product-photos";
 
-type TrackRow = { id: string; kind: ProgressTrack["kind"]; name: string; areas: string[]; started_on: string | null; notes: string | null; status: ProgressTrack["status"]; workout_sessions: ProgressTrack["workoutSessions"] | null; created_at: string };
+type TrackRow = { id: string; kind: ProgressTrack["kind"]; name: string; areas: string[]; started_on: string | null; notes: string | null; status: ProgressTrack["status"]; workout_sessions: ProgressTrack["workoutSessions"] | null; body_checkpoints: ProgressTrack["bodyCheckpoints"] | null; created_at: string };
 type ProductRow = { id: string; track_id: string; name: string; brand: string | null; linked_item_id: string | null; linked_routine_product_id: string | null; catalog_product_id: string | null; dose: string | null; created_at: string };
 type CatalogRow = { id: string; kind: "skin" | "supplement"; name: string; brand: string | null; photo_path: string | null; created_at: string };
 type PhotoRow = { id: string; track_id: string; photo_path: string; captured_on: string; note: string | null; period_days: number | null; usage_counts: Record<string, number> | null; created_at: string };
@@ -35,7 +35,7 @@ export async function loadProgressData(client: SupabaseClient, userId: string): 
   }));
   const data: ProgressData = { catalog: hydratedCatalog.map((product): ProgressCatalogProduct => ({ id: product.id, kind: product.kind, name: product.name, brand: product.brand ?? undefined, photo: product.url, photoPath: product.photo_path ?? undefined, createdAt: product.created_at })), tracks: tracks.map((track) => ({
     id: track.id, kind: track.kind, name: track.name, areas: track.areas ?? [], startedOn: track.started_on ?? undefined,
-    notes: track.notes ?? undefined, status: track.status, workoutSessions: track.workout_sessions ?? [], createdAt: track.created_at,
+    notes: track.notes ?? undefined, status: track.status, workoutSessions: track.workout_sessions ?? [], bodyCheckpoints: track.body_checkpoints ?? [], createdAt: track.created_at,
     products: products.filter((product) => product.track_id === track.id).map((product) => ({
       id: product.id, name: product.name, brand: product.brand ?? undefined, linkedItemId: product.linked_item_id ?? undefined,
       linkedRoutineProductId: product.linked_routine_product_id ?? undefined, catalogProductId: product.catalog_product_id ?? undefined, dose: product.dose ?? undefined, createdAt: product.created_at,
@@ -87,7 +87,7 @@ export async function syncProgressData(client: SupabaseClient, userId: string, p
   if (next.tracks.length) {
     const { error } = await client.from("progress_tracks").upsert(next.tracks.map((track) => ({
       id: track.id, user_id: userId, kind: track.kind, name: track.name, areas: track.areas, started_on: track.startedOn ?? null,
-      notes: track.notes ?? null, status: track.status, workout_sessions: track.workoutSessions ?? [], created_at: track.createdAt,
+      notes: track.notes ?? null, status: track.status, workout_sessions: track.workoutSessions ?? [], body_checkpoints: track.bodyCheckpoints ?? [], created_at: track.createdAt,
     })));
     if (error) throw error;
   }

@@ -4,11 +4,11 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { formatDate, makeId, ProgressCatalogProduct, ProgressCheckIn, ProgressData, ProgressPhoto, ProgressProduct, ProgressTrack, RoutineData, TrackedItem, WorkoutSession } from "@/lib/tracker";
+import { formatDate, makeId, ProgressCatalogProduct, ProgressCheckIn, ProgressData, ProgressPhoto, ProgressProduct, ProgressTrack, RoutineData, TrackedItem } from "@/lib/tracker";
 
 type Props = { data: ProgressData; onChange: (data: ProgressData) => void; items: TrackedItem[]; routine: RoutineData; userId?: string };
 type ProgressTab = "skin" | "supplement" | "workout";
-type ProgressDraft = { kind: string; fields: Record<string, string>; photoData?: string; selectedTrackId?: string; tab: ProgressTab; savedAt: string };
+type ProgressDraft = { kind: string; fields: Record<string, string>; photoData?: string | string[]; selectedTrackId?: string; tab: ProgressTab; savedAt: string };
 
 function localToday() {
   const date = new Date();
@@ -76,39 +76,65 @@ function ProductChooser({ items, routine, catalog, kind, onPick, onCustom }: { i
 }
 
 function WorkoutProgress({ data, onChange }: { data: ProgressData; onChange: (next: ProgressData) => void }) {
-  const [showPlan, setShowPlan] = useState(false);
-  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
-  const [showSession, setShowSession] = useState(false);
+  const [showJourneyForm, setShowJourneyForm] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showCheckpointForm, setShowCheckpointForm] = useState(false);
+  const [photoFiles, setPhotoFiles] = useState<string[]>([]);
+  const [photoError, setPhotoError] = useState("");
+  const [compareIds, setCompareIds] = useState<string[]>([]);
   const active = data.tracks.filter((track) => track.kind === "workout" && track.status === "active");
   const past = data.tracks.filter((track) => track.kind === "workout" && track.status === "completed");
-  const selected = data.tracks.find((track) => track.kind === "workout" && track.id === activeTrackId) ?? null;
-  function addPlan(event: FormEvent<HTMLFormElement>) {
+  const selected = data.tracks.find((track) => track.kind === "workout" && track.id === selectedId) ?? null;
+
+  async function readPhotos(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    setPhotoError("");
+    if (!files.length) return;
+    if (files.length + photoFiles.length > 8) { setPhotoError("Choose up to 8 photos for one checkpoint."); return; }
+    try { const prepared = await Promise.all(files.map(compressImage)); setPhotoFiles((current) => [...current, ...prepared]); }
+    catch (error) { setPhotoError(error instanceof Error ? error.message : "One of those photos could not be opened."); }
+  }
+
+  function createJourney(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const name = String(form.get("planName") ?? "").trim();
+    const name = String(form.get("journeyName") ?? "").trim();
     if (!name) return;
     const now = new Date().toISOString();
-    const track: ProgressTrack = { id: makeId(), kind: "workout", name, areas: [], startedOn: String(form.get("startedOn") ?? "") || localToday(), notes: String(form.get("planNotes") ?? "").trim() || undefined, status: "active", createdAt: now, products: [], photos: [], checkIns: [], workoutSessions: [] };
+    const track: ProgressTrack = { id: makeId(), kind: "workout", name, areas: [], notes: String(form.get("focus") ?? "").trim() || undefined, status: "active", createdAt: now, products: [], photos: [], checkIns: [], workoutSessions: [], bodyCheckpoints: [] };
     onChange({ ...data, tracks: [track, ...data.tracks] });
-    setActiveTrackId(track.id); setShowPlan(false); event.currentTarget.reset();
+    setSelectedId(track.id); setShowJourneyForm(false); setShowCheckpointForm(true); event.currentTarget.reset();
   }
-  function addSession(event: FormEvent<HTMLFormElement>) {
+
+  function saveCheckpoint(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected) return;
+    if (!selected || !photoFiles.length) { setPhotoError("Add at least one photo to save this checkpoint."); return; }
     const form = new FormData(event.currentTarget);
-    const session: WorkoutSession = { id: makeId(), date: String(form.get("sessionDate") ?? localToday()), exercise: String(form.get("exercise") ?? "").trim(), sets: Number(form.get("sets")) || undefined, reps: Number(form.get("reps")) || undefined, weight: Number(form.get("weight")) || undefined, weightUnit: String(form.get("weightUnit") ?? "kg"), distance: Number(form.get("distance")) || undefined, distanceUnit: String(form.get("distanceUnit") ?? "km"), durationMinutes: Number(form.get("duration")) || undefined, note: String(form.get("sessionNote") ?? "").trim() || undefined, createdAt: new Date().toISOString() };
-    if (!session.exercise) return;
-    onChange({ ...data, tracks: data.tracks.map((track) => track.id === selected.id ? { ...track, workoutSessions: [...(track.workoutSessions ?? []), session].sort((a, b) => a.date.localeCompare(b.date)) } : track) });
-    setShowSession(false); event.currentTarget.reset();
+    const date = String(form.get("checkpointDate") ?? localToday());
+    const now = new Date().toISOString();
+    const photos: ProgressPhoto[] = photoFiles.map((photo) => ({ id: makeId(), date, photo, createdAt: now }));
+    const weight = Number(form.get("bodyWeight"));
+    const checkpoint = { id: makeId(), date, photoIds: photos.map((photo) => photo.id), bodyWeight: Number.isFinite(weight) && weight > 0 ? weight : undefined, weightUnit: String(form.get("weightUnit") ?? "kg"), measurements: String(form.get("measurements") ?? "").trim() || undefined, changeNote: String(form.get("changeNote") ?? "").trim() || undefined, createdAt: now };
+    onChange({ ...data, tracks: data.tracks.map((track) => track.id === selected.id ? { ...track, startedOn: track.bodyCheckpoints?.length ? track.startedOn : date, photos: [...track.photos, ...photos], bodyCheckpoints: [...(track.bodyCheckpoints ?? []), checkpoint].sort((a, b) => a.date.localeCompare(b.date)) } : track) });
+    setPhotoFiles([]); setShowCheckpointForm(false); setPhotoError("");
   }
+
+  function toggleCompare(id: string) {
+    setCompareIds((current) => current.includes(id) ? current.filter((value) => value !== id) : current.length < 2 ? [...current, id] : [current[1], id]);
+  }
+
   return <div className="workout-progress">
-    <div className="progress-section-heading workout-heading"><div><p className="eyebrow">TRAINING LOG</p><h2>Workouts<span className="period">.</span></h2><p>Keep sessions together and see your lifts, reps, distance, or time build.</p></div><button type="button" className="button button-primary" onClick={() => setShowPlan((value) => !value)}>＋ New training log</button></div>
-    {showPlan ? <form className="progress-form" onSubmit={addPlan}><div className="progress-form-heading"><strong>Start a training log</strong><button type="button" className="text-button" onClick={() => setShowPlan(false)}>Close</button></div><label className="field"><span>Name</span><input name="planName" maxLength={120} placeholder="e.g. Strength training" required /></label><label className="field"><span>Started</span><input name="startedOn" type="date" max={localToday()} defaultValue={localToday()} /></label><label className="field"><span>Focus <b>OPTIONAL</b></span><input name="planNotes" maxLength={500} placeholder="e.g. Build consistency, 3 days a week" /></label><button className="button button-primary" type="submit">Create training log</button></form> : null}
-    {selected ? <section className="workout-detail"><button className="mobile-back-button" type="button" onClick={() => { setActiveTrackId(null); setShowSession(false); }}>← All training logs</button><div className="progress-detail-heading"><div><p className="eyebrow">{selected.startedOn ? `STARTED ${formatDate(selected.startedOn)}` : "TRAINING LOG"}</p><h3>{selected.name}<span className="period">.</span></h3>{selected.notes ? <p>{selected.notes}</p> : null}</div><button type="button" className="text-button" onClick={() => onChange({ ...data, tracks: data.tracks.map((track) => track.id === selected.id ? { ...track, status: track.status === "active" ? "completed" : "active" } : track) })}>{selected.status === "active" ? "Finish log" : "Reopen log"}</button></div><div className="workout-session-heading"><div><p className="eyebrow">YOUR SESSIONS</p><h4>Progression<span className="period">.</span></h4></div><button className="button button-outline" type="button" onClick={() => setShowSession((value) => !value)}>＋ Log a session</button></div>
-      {showSession ? <form className="progress-form workout-session-form" onSubmit={addSession}><div className="progress-form-heading"><strong>Session details</strong><button type="button" className="text-button" onClick={() => setShowSession(false)}>Close</button></div><div className="field-pair"><label className="field"><span>Date</span><input type="date" name="sessionDate" max={localToday()} defaultValue={localToday()} required /></label><label className="field"><span>Exercise</span><input name="exercise" maxLength={160} placeholder="e.g. Bench press" required /></label></div><div className="field-pair workout-metrics"><label className="field"><span>Sets</span><input type="number" inputMode="numeric" name="sets" min="1" placeholder="3" /></label><label className="field"><span>Reps</span><input type="number" inputMode="numeric" name="reps" min="1" placeholder="8" /></label><label className="field"><span>Weight</span><input type="number" inputMode="decimal" name="weight" min="0" step="0.25" placeholder="40" /></label><label className="field"><span>Unit</span><select name="weightUnit"><option>kg</option><option>lb</option></select></label></div><div className="field-pair workout-metrics"><label className="field"><span>Distance <b>OPTIONAL</b></span><input type="number" inputMode="decimal" name="distance" min="0" step="0.1" placeholder="2" /></label><label className="field"><span>Distance unit</span><select name="distanceUnit"><option>km</option><option>mi</option><option>m</option></select></label><label className="field"><span>Minutes <b>OPTIONAL</b></span><input type="number" inputMode="numeric" name="duration" min="1" placeholder="30" /></label></div><label className="field"><span>Notes <b>OPTIONAL</b></span><textarea name="sessionNote" rows={2} maxLength={2000} placeholder="How it felt, form notes, anything to remember" /></label><button type="submit" className="button button-primary">Save session</button></form> : null}
-      {(selected.workoutSessions ?? []).length ? <ol className="workout-session-list">{[...(selected.workoutSessions ?? [])].sort((a, b) => b.date.localeCompare(a.date)).map((session) => <li key={session.id}><time>{formatDate(session.date)}</time><strong>{session.exercise}</strong><span>{[session.sets && session.reps ? `${session.sets} × ${session.reps}` : null, session.weight ? `${session.weight} ${session.weightUnit ?? "kg"}` : null, session.distance ? `${session.distance} ${session.distanceUnit ?? "km"}` : null, session.durationMinutes ? `${session.durationMinutes} min` : null].filter(Boolean).join(" · ") || "Session logged"}</span>{session.note ? <p>{session.note}</p> : null}</li>)}</ol> : <div className="progress-empty"><strong>No sessions yet.</strong><p>Log an exercise with the numbers you care about. You can add different exercises over time.</p><button className="button button-primary" type="button" onClick={() => setShowSession(true)}>＋ Log first session</button></div>}
-    </section> : <div className="workout-log-grid">{active.length ? active.map((track) => <button type="button" key={track.id} className="progress-track-card" onClick={() => setActiveTrackId(track.id)}><span className="progress-card-photo"><span>↗</span></span><span className="progress-card-body"><small>{track.startedOn ? `SINCE ${formatDate(track.startedOn)}` : "TRAINING LOG"}</small><strong>{track.name}</strong><span>{track.notes || "Training progression"}</span><span>{(track.workoutSessions ?? []).length} session{(track.workoutSessions ?? []).length === 1 ? "" : "s"}</span></span><span className="progress-card-arrow">→</span></button>) : <div className="progress-empty"><span className="empty-glyph">↗</span><strong>Start your first training log.</strong><p>Track strength, running, cycling, or any movement. Add only the numbers that matter to you.</p><button type="button" className="button button-primary" onClick={() => setShowPlan(true)}>＋ New training log</button></div>}</div>}
-    {past.length ? <details className="progress-past-tracks"><summary>Past training logs <span>{past.length}</span></summary><div className="workout-log-grid">{past.map((track) => <button type="button" key={track.id} className="progress-track-card" onClick={() => setActiveTrackId(track.id)}><span className="progress-card-photo"><span>↗</span></span><span className="progress-card-body"><small>PAST</small><strong>{track.name}</strong><span>{(track.workoutSessions ?? []).length} sessions saved</span></span></button>)}</div></details> : null}
+    <div className="progress-section-heading workout-heading"><div><p className="eyebrow">BODY PROGRESSION</p><h2>Photo timeline<span className="period">.</span></h2><p>Take a few photos from the same angles and note what you notice changing over time.</p></div><button type="button" className="button button-primary" onClick={() => setShowJourneyForm((value) => !value)}>＋ New progression</button></div>
+    {showJourneyForm ? <form className="progress-form" onSubmit={createJourney}><div className="progress-form-heading"><strong>Start a photo progression</strong><button type="button" className="text-button" onClick={() => setShowJourneyForm(false)}>Close</button></div><label className="field"><span>Name</span><input name="journeyName" maxLength={120} placeholder="e.g. Overall progress, posture, arms" required /></label><label className="field"><span>Focus <b>OPTIONAL</b></span><input name="focus" maxLength={500} placeholder="What do you want to keep track of?" /></label><button className="button button-primary" type="submit">Create and add first photos</button></form> : null}
+    {selected ? <section className="workout-detail"><button className="mobile-back-button" type="button" onClick={() => { setSelectedId(null); setShowCheckpointForm(false); }}>← All progressions</button><div className="progress-detail-heading"><div><p className="eyebrow">{selected.startedOn ? `STARTED ${formatDate(selected.startedOn)}` : "PHOTO PROGRESSION"}</p><h3>{selected.name}<span className="period">.</span></h3>{selected.notes ? <p>{selected.notes}</p> : null}</div><button type="button" className="text-button" onClick={() => onChange({ ...data, tracks: data.tracks.map((track) => track.id === selected.id ? { ...track, status: track.status === "active" ? "completed" : "active" } : track) })}>{selected.status === "active" ? "Finish progression" : "Reopen progression"}</button></div>
+      <div className="workout-session-heading"><div><p className="eyebrow">YOUR PHOTOS</p><h4>Checkpoints<span className="period">.</span></h4></div><button className="button button-outline" type="button" onClick={() => { setPhotoFiles([]); setPhotoError(""); setShowCheckpointForm((value) => !value); }}>＋ Add photos</button></div>
+      {showCheckpointForm ? <form className="progress-form workout-session-form" onSubmit={saveCheckpoint}><div className="progress-form-heading"><strong>{selected.photos.length ? "Add a progress checkpoint" : "Add your Day 1 photos"}</strong><button type="button" className="text-button" onClick={() => setShowCheckpointForm(false)}>Close</button></div><label className="field"><span>Photos <b>UP TO 8</b></span><input type="file" accept="image/*,.heic,.heif,.avif" capture="environment" multiple onChange={readPhotos} /><small className="field-hint">Add front, side, or any angles you want to compare. Photos stay private to your account.</small></label>{photoFiles.length ? <div className="workout-photo-preview-grid">{photoFiles.map((photo, index) => <img key={`${index}-${photo.slice(-16)}`} src={photo} alt={`Selected progression photo ${index + 1}`} />)}</div> : null}<label className="field"><span>Date taken</span><input type="date" name="checkpointDate" max={localToday()} defaultValue={localToday()} required /></label><div className="field-pair"><label className="field"><span>Body weight <b>OPTIONAL</b></span><input type="number" inputMode="decimal" name="bodyWeight" min="0" step="0.1" placeholder="e.g. 68.5" /></label><label className="field"><span>Unit</span><select name="weightUnit"><option>kg</option><option>lb</option></select></label></div><label className="field"><span>Measurements <b>OPTIONAL</b></span><input name="measurements" maxLength={1000} placeholder="e.g. waist 82 cm · arm 31 cm" /></label><label className="field"><span>What looks or feels different? <b>OPTIONAL</b></span><textarea name="changeNote" rows={3} maxLength={2000} placeholder="Changes you notice, how you feel, or anything to remember" /></label>{photoError ? <p className="form-error" role="alert">{photoError}</p> : null}<button type="submit" className="button button-primary">Save checkpoint</button></form> : null}
+      {(selected.bodyCheckpoints ?? []).length > 1 ? <p className="progress-compare-hint">Choose two checkpoints to compare.</p> : null}
+      {compareIds.length === 2 ? <div className="workout-comparison">{compareIds.map((id) => { const point = selected.bodyCheckpoints?.find((entry) => entry.id === id); if (!point) return null; const pointPhotos = point.photoIds.map((photoId) => selected.photos.find((photo) => photo.id === photoId)).filter((photo): photo is ProgressPhoto => Boolean(photo)); return <section key={id}><h5>{point.date === selected.startedOn ? "Day 1" : `Day ${dayNumber(point.date, selected.startedOn || point.date)}`} · {formatDate(point.date)}</h5><div className="workout-photo-preview-grid">{pointPhotos.map((photo) => <img key={photo.id} src={photo.photo} alt={`Progress photo from ${formatDate(point.date)}`} />)}</div>{point.bodyWeight ? <p>{point.bodyWeight} {point.weightUnit}</p> : null}{point.measurements ? <p>{point.measurements}</p> : null}</section>; })}</div> : null}
+      {(selected.bodyCheckpoints ?? []).length ? <ol className="workout-session-list">{[...(selected.bodyCheckpoints ?? [])].sort((a, b) => b.date.localeCompare(a.date)).map((point) => { const pointPhotos = point.photoIds.map((photoId) => selected.photos.find((photo) => photo.id === photoId)).filter((photo): photo is ProgressPhoto => Boolean(photo)); return <li key={point.id} className="body-checkpoint"><label className="workout-compare-select"><input type="checkbox" checked={compareIds.includes(point.id)} onChange={() => toggleCompare(point.id)} /><span>Compare</span></label><time>{point.date === selected.startedOn ? "DAY 1" : `DAY ${dayNumber(point.date, selected.startedOn || point.date)}`} · {formatDate(point.date)}</time><div className="workout-photo-preview-grid">{pointPhotos.map((photo) => <img key={photo.id} src={photo.photo} alt={`${selected.name} on ${formatDate(point.date)}`} />)}</div>{point.bodyWeight ? <strong>{point.bodyWeight} {point.weightUnit}</strong> : null}{point.measurements ? <span>{point.measurements}</span> : null}{point.changeNote ? <p>{point.changeNote}</p> : null}</li>; })}</ol> : <div className="progress-empty"><strong>No photos yet.</strong><p>Add a few angles today, then come back to save another checkpoint when you want to compare.</p><button className="button button-primary" type="button" onClick={() => setShowCheckpointForm(true)}>＋ Add first photos</button></div>}
+    </section> : <div className="workout-log-grid">{active.length ? active.map((track) => <button type="button" key={track.id} className="progress-track-card" onClick={() => setSelectedId(track.id)}><span className="progress-card-photo"><span>◷</span></span><span className="progress-card-body"><small>{track.startedOn ? `SINCE ${formatDate(track.startedOn)}` : "PHOTO PROGRESSION"}</small><strong>{track.name}</strong><span>{track.notes || "Progress photos and notes"}</span><span>{(track.bodyCheckpoints ?? []).length} checkpoint{(track.bodyCheckpoints ?? []).length === 1 ? "" : "s"}</span></span><span className="progress-card-arrow">→</span></button>) : <div className="progress-empty"><span className="empty-glyph">◷</span><strong>Start a photo progression.</strong><p>Add multiple photos for each date, then note measurements and what you notice changing.</p><button type="button" className="button button-primary" onClick={() => setShowJourneyForm(true)}>＋ New progression</button></div>}</div>}
+    {past.length ? <details className="progress-past-tracks"><summary>Past progressions <span>{past.length}</span></summary><div className="workout-log-grid">{past.map((track) => <button type="button" key={track.id} className="progress-track-card" onClick={() => setSelectedId(track.id)}><span className="progress-card-photo"><span>↺</span></span><span className="progress-card-body"><small>PAST</small><strong>{track.name}</strong><span>{(track.bodyCheckpoints ?? []).length} checkpoints saved</span></span></button>)}</div></details> : null}
   </div>;
 }
 
@@ -120,7 +146,7 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
   const [showPhotoForm, setShowPhotoForm] = useState(false);
   const [showCatalogForm, setShowCatalogForm] = useState(false);
   const [customProductForm, setCustomProductForm] = useState(false);
-  const [photoData, setPhotoData] = useState("");
+  const [photoData, setPhotoData] = useState<string[]>([]);
   const [catalogPhotoData, setCatalogPhotoData] = useState("");
   const [photoError, setPhotoError] = useState("");
   const [photoDate, setPhotoDate] = useState(localToday());
@@ -150,8 +176,8 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
     } catch { /* A broken local draft never blocks normal Progress use. */ }
     const timer = window.setTimeout(() => {
       if (draft) {
-        setDraftSavedAt(draft.savedAt || ""); setDraftMessage("Draft restored from this device"); setPhotoData(draft.photoData || "");
-        if (["catalog", "track", "add-product"].includes(draft.kind)) setCatalogPhotoData(draft.photoData || "");
+        setDraftSavedAt(draft.savedAt || ""); setDraftMessage("Draft restored from this device"); setPhotoData(Array.isArray(draft.photoData) ? draft.photoData : draft.photoData ? [draft.photoData] : []);
+        if (["catalog", "track", "add-product"].includes(draft.kind)) setCatalogPhotoData(Array.isArray(draft.photoData) ? draft.photoData[0] || "" : draft.photoData || "");
         if (draft.fields.photoDate) setPhotoDate(draft.fields.photoDate);
         if (draft.fields.photoNote) setPhotoNote(draft.fields.photoNote);
         setTab(draft.tab || "skin");
@@ -180,7 +206,7 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
     });
   }, [draftLoaded, showTrackForm, showCatalogForm, showPhotoForm, showProductForm, selectedId]);
 
-  function saveDraft(kind: string, form: HTMLFormElement, image = photoData) {
+  function saveDraft(kind: string, form: HTMLFormElement, image: string | string[] = photoData) {
     const fields = Object.fromEntries([...new FormData(form).entries()].map(([key, value]) => [key, typeof value === "string" ? value : ""]));
     const draft: ProgressDraft = { kind, fields, photoData: image || undefined, selectedTrackId: selected?.id, tab, savedAt: new Date().toISOString() };
     draftRef.current = draft;
@@ -304,10 +330,11 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
   }
 
   async function handlePhoto(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]; const form = event.currentTarget.form; event.target.value = ""; setPhotoError("");
-    if (!file) return;
-    if ((!file.type.startsWith("image/") && !/\.(heic|heif|avif|tif|tiff|bmp|gif|jpg|jpeg|png|webp)$/i.test(file.name)) || file.size > 30 * 1024 * 1024) { setPhotoError("Choose an image under 30 MB."); return; }
-    try { const prepared = await compressImage(file); setPhotoData(prepared); if (form) saveDraft("photo", form, prepared); }
+    const files = Array.from(event.target.files ?? []); const form = event.currentTarget.form; event.target.value = ""; setPhotoError("");
+    if (!files.length) return;
+    if (files.length + photoData.length > 8) { setPhotoError("Choose up to 8 photos for one checkpoint."); return; }
+    if (files.some((file) => ((!file.type.startsWith("image/") && !/\.(heic|heif|avif|tif|tiff|bmp|gif|jpg|jpeg|png|webp)$/i.test(file.name)) || file.size > 30 * 1024 * 1024))) { setPhotoError("Choose image files under 30 MB each."); return; }
+    try { const prepared = [...photoData, ...await Promise.all(files.map(compressImage))]; setPhotoData(prepared); if (form) saveDraft("photo", form, prepared); }
     catch (error) { setPhotoError(error instanceof Error ? error.message : "That photo could not be prepared."); }
   }
 
@@ -336,12 +363,12 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
   })();
 
   function openPhotoForm() {
-    setPhotoData(""); setPhotoError(""); setPhotoDate(localToday()); setPhotoNote(""); setPhotoCounts({}); setShowPhotoForm(true);
+    setPhotoData([]); setPhotoError(""); setPhotoDate(localToday()); setPhotoNote(""); setPhotoCounts({}); setShowPhotoForm(true);
   }
 
   function savePhoto(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected || !photoData || !photoDate) { setPhotoError("Choose a photo and its date first."); return; }
+    if (!selected || !photoData.length || !photoDate) { setPhotoError("Choose at least one photo and its date first."); return; }
     const form = new FormData(event.currentTarget);
     const usageCounts: Record<string, number> = {};
     if (interval) for (const { product, periodDays, needsEstimate, usedCount } of interval.checkIns) {
@@ -351,9 +378,10 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
       if (!Number.isInteger(count) || count < 0 || count > periodDays) { setPhotoError(`Enter a use count from 0 to ${periodDays} for ${product.name}.`); return; }
       usageCounts[product.id] = count;
     }
-    const photo: ProgressPhoto = { id: makeId(), date: photoDate, photo: photoData, note: photoNote.trim() || undefined, periodDays: interval?.periodDays, usageCounts: interval ? usageCounts : undefined, createdAt: new Date().toISOString() };
-    changeTrack(selected.id, (track) => ({ ...track, photos: [...track.photos, photo] }));
-    setShowPhotoForm(false); setPhotoData(""); setPhotoNote(""); setPhotoCounts({}); setCompareIds([]); clearDraft();
+    const now = new Date().toISOString();
+    const photos: ProgressPhoto[] = photoData.map((photo) => ({ id: makeId(), date: photoDate, photo, note: photoNote.trim() || undefined, periodDays: interval?.periodDays, usageCounts: interval ? usageCounts : undefined, createdAt: now }));
+    changeTrack(selected.id, (track) => ({ ...track, photos: [...track.photos, ...photos] }));
+    setShowPhotoForm(false); setPhotoData([]); setPhotoNote(""); setPhotoCounts({}); setCompareIds([]); clearDraft();
   }
 
   function addProduct(event: FormEvent<HTMLFormElement>) {
@@ -434,13 +462,13 @@ export function ProgressView({ data, onChange, items, routine, userId = "local" 
         })}</ol> : <div className="progress-empty progress-photo-empty"><strong>Your first photo starts Day 1.</strong><p>Keep the same lighting and framing when you can. You can add more checkpoints whenever you like.</p><button className="button button-primary" type="button" onClick={openPhotoForm}>Add the first photo</button></div>}
       </section>
 
-      {showPhotoForm ? <form className="progress-form progress-photo-form" data-progress-draft="photo" onInput={(event) => saveDraft("photo", event.currentTarget)} onSubmit={savePhoto}><div className="progress-form-heading"><strong>{selected.photos.length ? "Add a progress photo" : "Start with your Day 1 photo"}</strong><button className="text-button" type="button" onClick={() => setShowPhotoForm(false)}>Close</button></div>
-        <label className="field"><span>Photo <b>REQUIRED</b></span><input type="file" accept="image/*,.heic,.heif,.avif" capture="environment" onChange={handlePhoto} required={!photoData} /></label>{photoData ? <img className="progress-upload-preview" src={photoData} alt="Photo preview" /> : null}<small className="field-hint">Photos are prepared as a smaller JPEG for safe storage. HEIC and other image types are accepted when your browser can open them.</small>
+      {showPhotoForm ? <form className="progress-form progress-photo-form" data-progress-draft="photo" onInput={(event) => saveDraft("photo", event.currentTarget)} onSubmit={savePhoto}><div className="progress-form-heading"><strong>{selected.photos.length ? "Add a progress checkpoint" : "Start with your Day 1 photos"}</strong><button className="text-button" type="button" onClick={() => setShowPhotoForm(false)}>Close</button></div>
+        <label className="field"><span>Photos <b>UP TO 8</b></span><input type="file" accept="image/*,.heic,.heif,.avif" capture="environment" multiple onChange={handlePhoto} />{photoData.length ? <small className="field-hint">{photoData.length} photo{photoData.length === 1 ? "" : "s"} selected. Choose more to add angles, or remove any below.</small> : null}</label>{photoData.length ? <div className="workout-photo-preview-grid">{photoData.map((photo, index) => <div className="progress-multi-photo-preview" key={`${index}-${photo.slice(-16)}`}><img src={photo} alt={`Selected progress photo ${index + 1}`} /><button type="button" onClick={() => { const next = photoData.filter((_, photoIndex) => photoIndex !== index); setPhotoData(next); const form = document.querySelector<HTMLFormElement>('.progress-form[data-progress-draft="photo"]'); if (form) saveDraft("photo", form, next); }} aria-label={`Remove photo ${index + 1}`}>×</button></div>)}</div> : null}<small className="field-hint">Photos are prepared as smaller JPEGs for safe storage. HEIC and other image types are accepted when your browser can open them.</small>
         <label className="field"><span>Date taken</span><input type="date" name="photoDate" value={photoDate} max={localToday()} onChange={(event) => { setPhotoDate(event.target.value); const form = event.currentTarget.form; if (form) saveDraft("photo", form); }} required /></label>
         {interval?.checkIns.map(({ product, periodDays, loggedDays, usedCount, needsEstimate }) => needsEstimate ? <label className="field" key={product.id}><span>How many times did you use {productLabel(product)} in the last {periodDays} days?</span><small className="field-hint">Check-ins cover {loggedDays} days. Give your best estimate, or enter 0.</small><input type="number" name={`usage-${product.id}`} min="0" max={periodDays} step="1" inputMode="numeric" value={photoCounts[product.id] ?? String(usedCount)} onChange={(event) => setPhotoCounts((current) => ({ ...current, [product.id]: event.target.value }))} required /></label> : null)}
         {interval && !interval.checkIns.some((entry) => entry.needsEstimate) ? <p className="progress-estimate-confirm">All {interval.periodDays} days are logged. Usage totals will come from your daily check-ins.</p> : null}
         <label className="field"><span>A note <b>OPTIONAL</b></span><textarea name="photoNote" value={photoNote} onChange={(event) => { setPhotoNote(event.target.value); const form = event.currentTarget.form; if (form) saveDraft("photo", form); }} maxLength={2000} rows={3} placeholder="Lighting, changes, or anything you want to remember" /></label>
-        {draftMessage ? <small className="draft-status" role="status">{draftMessage}</small> : null}{photoError ? <p className="form-error" role="alert">{photoError}</p> : null}<button type="submit" className="button button-primary" disabled={!photoData}>Save checkpoint</button>
+        {draftMessage ? <small className="draft-status" role="status">{draftMessage}</small> : null}{photoError ? <p className="form-error" role="alert">{photoError}</p> : null}<button type="submit" className="button button-primary" disabled={!photoData.length}>Save checkpoint</button>
       </form> : null}
     </div> : <>
       <div className="progress-overview-heading"><div><p className="eyebrow">{tab === "skin" ? "AREAS & ROUTINES" : "YOUR SUPPLEMENTS"}</p><h2>{tab === "skin" ? "Skin journeys" : "Supplement tracks"}<span className="period">.</span></h2><p>{tab === "skin" ? "Keep photos, product use, and notes together by area." : "Follow each supplement on its own timeline."}</p></div><div className="progress-overview-actions"><button className="button button-outline" type="button" onClick={() => { setShowCatalogForm((value) => !value); setCatalogPhotoData(""); }}>＋ Save a product</button><button className="button button-primary" type="button" onClick={() => setShowTrackForm((value) => !value)}>＋ {tab === "skin" ? "New skin journey" : "Add supplement"}</button></div></div>

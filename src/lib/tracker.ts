@@ -129,6 +129,7 @@ export type ProgressCheckIn = {
   createdAt: string;
 };
 export type WorkoutSession = { id: string; date: string; exercise: string; sets?: number; reps?: number; weight?: number; weightUnit?: string; distance?: number; distanceUnit?: string; durationMinutes?: number; note?: string; createdAt: string };
+export type BodyCheckpoint = { id: string; date: string; photoIds: string[]; bodyWeight?: number; weightUnit?: string; measurements?: string; changeNote?: string; createdAt: string };
 export type ProgressTrack = {
   id: string;
   kind: ProgressKind;
@@ -142,6 +143,7 @@ export type ProgressTrack = {
   photos: ProgressPhoto[];
   checkIns: ProgressCheckIn[];
   workoutSessions?: WorkoutSession[];
+  bodyCheckpoints?: BodyCheckpoint[];
 };
 export type ProgressData = { tracks: ProgressTrack[]; catalog?: ProgressCatalogProduct[] };
 
@@ -171,7 +173,9 @@ export function validProgressData(value: unknown): value is ProgressData {
     const checkInsValid = track.checkIns.every((checkIn) => checkIn && typeof checkIn.id === "string" && typeof checkIn.productId === "string" && typeof checkIn.date === "string" && typeof checkIn.used === "boolean" && typeof checkIn.createdAt === "string" && (checkIn.feeling === undefined || (typeof checkIn.feeling === "string" && checkIn.feeling.length <= 80)) && (checkIn.note === undefined || (typeof checkIn.note === "string" && checkIn.note.length <= 2000)));
     const sessions = track.workoutSessions ?? [];
     const sessionsValid = Array.isArray(sessions) && sessions.every((entry) => entry && typeof entry.id === "string" && typeof entry.date === "string" && typeof entry.exercise === "string" && entry.exercise.length <= 160 && typeof entry.createdAt === "string" && ["sets", "reps", "weight", "distance", "durationMinutes"].every((key) => (entry as unknown as Record<string, unknown>)[key] === undefined || (typeof (entry as unknown as Record<string, unknown>)[key] === "number" && Number.isFinite((entry as unknown as Record<string, number>)[key]))) && (entry.note === undefined || (typeof entry.note === "string" && entry.note.length <= 2000)));
-    return productsValid && photosValid && checkInsValid && sessionsValid && (track.startedOn === undefined || typeof track.startedOn === "string") && (track.notes === undefined || (typeof track.notes === "string" && track.notes.length <= 2000));
+    const checkpoints = track.bodyCheckpoints ?? [];
+    const checkpointsValid = Array.isArray(checkpoints) && checkpoints.every((entry) => entry && typeof entry.id === "string" && typeof entry.date === "string" && typeof entry.createdAt === "string" && Array.isArray(entry.photoIds) && entry.photoIds.every((id) => typeof id === "string") && (entry.bodyWeight === undefined || (typeof entry.bodyWeight === "number" && Number.isFinite(entry.bodyWeight) && entry.bodyWeight >= 0)) && (entry.measurements === undefined || (typeof entry.measurements === "string" && entry.measurements.length <= 1000)) && (entry.changeNote === undefined || (typeof entry.changeNote === "string" && entry.changeNote.length <= 2000)));
+    return productsValid && photosValid && checkInsValid && sessionsValid && checkpointsValid && (track.startedOn === undefined || typeof track.startedOn === "string") && (track.notes === undefined || (typeof track.notes === "string" && track.notes.length <= 2000));
   });
 }
 

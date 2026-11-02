@@ -505,6 +505,18 @@ a { color: inherit; }
 .workout-session-list li > span { color: var(--accent); }
 .workout-session-list li p { grid-column: 2 / -1; margin: 0; color: var(--muted); }
 .workout-log-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.workout-photo-preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.workout-photo-preview-grid img { display: block; width: 100%; max-height: 520px; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); }
+.progress-multi-photo-preview { position: relative; min-width: 0; }
+.progress-multi-photo-preview button { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--rule); border-radius: 50%; background: var(--paper); color: var(--ink); font-size: 23px; cursor: pointer; }
+.workout-session-list li.body-checkpoint { grid-template-columns: 100px minmax(0, 1fr); align-items: start; }
+.body-checkpoint .workout-photo-preview-grid, .body-checkpoint > strong, .body-checkpoint > span, .body-checkpoint > p { grid-column: 2; }
+.workout-compare-select { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.workout-compare-select input { width: 18px; height: 18px; accent-color: var(--accent); }
+.workout-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.workout-comparison > section { min-width: 0; padding: 14px; border: 1px solid var(--rule); border-radius: 5px; }
+.workout-comparison h5 { margin: 0 0 12px; font-size: 16px; }
+.workout-comparison p { color: var(--muted); }
 .progress-overview-heading { align-items: end; padding: 32px 0 22px; }
 .progress-overview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .progress-overview-heading h2, .progress-detail-heading h2 { margin: 4px 0; font-size: clamp(32px, 4vw, 54px); letter-spacing: -.055em; }
@@ -610,6 +622,9 @@ a { color: inherit; }
   .workout-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workout-session-list li { grid-template-columns: 1fr; gap: 6px; }
   .workout-session-list li p { grid-column: auto; }
+  .workout-session-list li.body-checkpoint { grid-template-columns: 1fr; }
+  .body-checkpoint .workout-photo-preview-grid, .body-checkpoint > strong, .body-checkpoint > span, .body-checkpoint > p { grid-column: auto; }
+  .workout-comparison { grid-template-columns: 1fr; }
   .progress-overview-heading .button { align-self: start; }
   .progress-overview-actions { width: 100%; }
   .progress-overview-actions .button { flex: 1; padding-inline: 9px; }
